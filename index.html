@@ -1,0 +1,2737 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Papertrade · Simulador</title>
+<meta name="description" content="Simulador de trading (paper trading) con datos reales de Finnhub. Educativo, sin dinero real.">
+
+<!-- Tema: se aplica antes de pintar para evitar un destello claro -->
+<script>
+  try { var t = localStorage.getItem('papertrade.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+
+<!-- Tipografía: Geist con Inter como respaldo -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- Gráficos: lightweight-charts de TradingView (v4, API addCandlestickSeries / addLineSeries) -->
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+/* =====================================================================
+   1. TOKENS — la paleta es cerrada: no se usa ningún color fuera de aquí
+   ===================================================================== */
+:root{
+  --bg:#f5f5f5;          /* fondo de página / botón secundario / inputs */
+  --card:#ffffff;        /* tarjetas */
+  --sidebar:#fafafa;     /* sidebar y menú inferior */
+  --fg:#0a0a0a;          /* texto principal */
+  --muted:#737373;       /* texto secundario / placeholder */
+  --border:#e5e5e5;      /* bordes */
+  --primary:#0a0a0a;     /* botón relleno */
+  --primary-2:#171717;   /* badge relleno / hover del primario */
+  --primary-fg:#fafafa;  /* texto sobre relleno */
+  --red:#e7000b;         /* SOLO pérdidas, ventas, errores y acciones destructivas */
+  --destructive:#e7000b; /* relleno de botones destructivos / venta */
+  --on-destructive:#fafafa;
+  --green:#00a63e;       /* SOLO velas alcistas del gráfico */
+
+  --shadow:0 0 0 1px rgba(23,23,23,0.05),0 1px 3px rgba(0,0,0,0.1),0 1px 2px -1px rgba(0,0,0,0.1);
+  --overlay:rgba(10,10,10,0.4);
+  --veil:rgba(255,255,255,0.75); /* velo sobre el gráfico mientras carga */
+  color-scheme:light;
+
+  --r-card:24px;   /* tarjetas */
+  --r-pill:18px;   /* botones, inputs, badges */
+  --r-nested:10px; /* elementos anidados */
+
+  --font:"Geist","Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+
+/* Modo oscuro: mismo carácter monocromo, invertido.
+   Se aplica si el sistema lo pide (salvo que el usuario fuerce claro) o si se elige "Oscuro". */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0a0a0a; --card:#171717; --sidebar:#111111; --fg:#fafafa; --muted:#a1a1a1; --border:#262626;
+    --primary:#fafafa; --primary-2:#e5e5e5; --primary-fg:#0a0a0a;
+    --red:#ff6467; --destructive:#c10007; --on-destructive:#fafafa; --green:#00c950;
+    --shadow:0 0 0 1px rgba(255,255,255,0.04),0 1px 3px rgba(0,0,0,0.5),0 1px 2px -1px rgba(0,0,0,0.5);
+    --overlay:rgba(0,0,0,0.6); --veil:rgba(23,23,23,0.8);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0a0a0a; --card:#171717; --sidebar:#111111; --fg:#fafafa; --muted:#a1a1a1; --border:#262626;
+  --primary:#fafafa; --primary-2:#e5e5e5; --primary-fg:#0a0a0a;
+  --red:#ff6467; --destructive:#c10007; --on-destructive:#fafafa; --green:#00c950;
+  --shadow:0 0 0 1px rgba(255,255,255,0.04),0 1px 3px rgba(0,0,0,0.5),0 1px 2px -1px rgba(0,0,0,0.5);
+  --overlay:rgba(0,0,0,0.6); --veil:rgba(23,23,23,0.8);
+  color-scheme:dark;
+}
+
+/* =====================================================================
+   2. BASE
+   ===================================================================== */
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+html,body{margin:0;background:var(--bg);color:var(--fg)}
+body{
+  font-family:var(--font);font-size:14px;font-weight:400;line-height:1.43;
+  font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;
+}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--muted);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.icon{flex:none;display:block}
+.ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Tipos de texto */
+.eyebrow,.label{font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.h1{margin:0;font-size:30px;font-weight:600;letter-spacing:-0.025em;line-height:1.2}
+.h-xl{margin:0;font-size:48px;font-weight:600;letter-spacing:-0.05em;line-height:1}
+.card-title{font-size:16px;font-weight:600;letter-spacing:-0.0125em}
+.card-sub{font-size:12px;color:var(--muted)}
+p{margin:0}
+
+kbd{
+  font-family:inherit;font-size:12px;font-weight:500;line-height:18px;
+  padding:0 6px;border-radius:6px;background:var(--bg);border:1px solid var(--border);color:var(--muted)
+}
+
+/* =====================================================================
+   3. LAYOUT
+   ===================================================================== */
+.app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}
+
+.sidebar{
+  position:sticky;top:0;height:100vh;background:var(--sidebar);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;gap:24px;padding:16px 12px
+}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px}
+.logo{width:32px;height:32px;border-radius:var(--r-nested);background:var(--primary);color:var(--primary-fg);display:grid;place-items:center}
+.brand-name{font-weight:600;letter-spacing:-0.025em;line-height:1.2}
+.brand-sub{font-size:12px;color:var(--muted)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav .label{padding:0 12px 6px}
+.nav a{
+  display:flex;align-items:center;gap:10px;height:36px;padding:0 12px;border-radius:var(--r-nested);
+  color:var(--muted);text-decoration:none;font-weight:500
+}
+.nav a:hover{background:var(--bg);color:var(--fg)}
+.nav a.active{background:var(--card);color:var(--fg);box-shadow:var(--shadow)}
+.nav-count{margin-left:auto}
+.sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px}
+.status{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:var(--r-nested);background:var(--card)}
+.status-title{font-weight:500;line-height:1.3}
+.status-sub{font-size:12px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);margin-top:5px;flex:none}
+.dot.live{background:var(--fg);animation:pulse 2s ease-in-out infinite}
+.dot.err{background:var(--red)}
+@keyframes pulse{50%{opacity:.35}}
+.side-disclaimer{font-size:12px;color:var(--muted);padding:0 4px}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{
+  position:sticky;top:0;z-index:20;height:56px;display:flex;align-items:center;justify-content:space-between;
+  gap:16px;padding:0 24px;background:var(--bg);border-bottom:1px solid var(--border)
+}
+.crumbs{display:flex;align-items:center;gap:6px;color:var(--muted);min-width:0;white-space:nowrap}
+.crumbs .current{color:var(--fg);font-weight:500}
+.search-trigger{
+  display:flex;align-items:center;gap:8px;height:36px;padding:0 6px 0 14px;border:none;border-radius:var(--r-pill);
+  background:var(--card);color:var(--muted);width:300px;box-shadow:inset 0 0 0 1px var(--border);text-align:left
+}
+.search-trigger:hover{color:var(--fg)}
+.search-trigger kbd{margin-left:auto}
+.disclaimer-bar{
+  display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 16px;font-size:12px;color:var(--muted);
+  background:var(--sidebar);border-bottom:1px solid var(--border);text-align:center
+}
+.content{width:100%;max-width:1280px;margin:0 auto;padding:24px 24px 80px}
+.view{display:flex;flex-direction:column;gap:48px}
+.stack{display:flex;flex-direction:column;gap:16px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+/* Aviso de modo demo */
+.banner{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 10px 10px 16px;margin-bottom:24px;
+  border:1px solid var(--border);border-radius:var(--r-pill);background:var(--card);box-shadow:var(--shadow)
+}
+.banner p{flex:1;min-width:200px}
+
+/* =====================================================================
+   4. COMPONENTES
+   ===================================================================== */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--shadow);padding:20px;min-width:0}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+
+/* Botones */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 16px;
+  border-radius:var(--r-pill);font-size:14px;font-weight:500;border:1px solid transparent;white-space:nowrap;
+  transition:background-color .15s,opacity .15s;text-decoration:none
+}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.full{width:100%}
+.btn.sm{height:32px;padding:0 12px}
+.btn-primary{background:var(--primary);color:var(--primary-fg)}
+.btn-primary:not(:disabled):hover{background:var(--primary-2)}
+.btn-secondary{background:var(--bg);color:var(--fg)}
+.btn-secondary:not(:disabled):hover{background:var(--border)}
+.btn-outline{background:transparent;border-color:var(--border);color:var(--fg)}
+.btn-outline:not(:disabled):hover{background:var(--bg)}
+.btn-destructive{background:var(--destructive);color:var(--on-destructive)}
+.btn-destructive:not(:disabled):hover{opacity:.9}
+.btn-outline-destructive{background:transparent;border-color:var(--border);color:var(--red)}
+.btn-outline-destructive:hover{background:var(--bg)}
+.icon-btn{
+  width:32px;height:32px;display:inline-grid;place-items:center;border-radius:var(--r-pill);border:none;
+  background:transparent;color:var(--muted);flex:none
+}
+.icon-btn:hover{background:var(--bg);color:var(--fg)}
+.icon-btn.active{color:var(--fg)}
+.icon-btn.active svg{fill:currentColor}
+
+/* Inputs */
+.input{
+  height:36px;width:100%;padding:0 14px;border-radius:var(--r-pill);border:none;background:var(--bg);color:var(--fg);
+  outline:none;box-shadow:none;transition:box-shadow .15s,background-color .15s
+}
+.input::placeholder{color:var(--muted)}
+.input:focus{background:var(--card);box-shadow:0 0 0 1px var(--border)}
+.input[type=number]{-moz-appearance:textfield}
+.input::-webkit-outer-spin-button,.input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.field{display:flex;flex-direction:column;gap:6px}
+.hint{font-size:12px;color:var(--muted)}
+.form-error{font-size:12px;color:var(--red);min-height:17px}
+
+/* Control segmentado */
+.segmented{display:inline-flex;gap:2px;padding:3px;border-radius:var(--r-pill);background:var(--bg)}
+.segmented button{
+  height:30px;padding:0 12px;border:none;border-radius:15px;background:transparent;color:var(--muted);
+  font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap
+}
+.segmented button:hover{color:var(--fg)}
+.segmented button.active{background:var(--card);color:var(--fg);box-shadow:0 0 0 1px rgba(23,23,23,0.05),0 1px 2px rgba(0,0,0,0.1)}
+.segmented.full{display:flex}
+.segmented.full button{flex:1}
+#sideSeg button[data-side=buy].active{background:var(--primary);color:var(--primary-fg)}
+#sideSeg button[data-side=sell].active{background:var(--destructive);color:var(--on-destructive)}
+
+/* Badges en píldora */
+.badge{
+  display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 10px;border-radius:var(--r-pill);
+  font-size:12px;font-weight:500;border:1px solid transparent;white-space:nowrap;line-height:1
+}
+.badge-solid{background:var(--primary-2);color:var(--primary-fg)}
+.badge-outline{border-color:var(--border);background:var(--card);color:var(--fg)}
+.badge-muted{background:var(--bg);color:var(--muted)}
+.badge-red{border-color:var(--border);background:var(--card);color:var(--red)}
+
+/* Variaciones: ganancias en negro con ▲, pérdidas en rojo con ▼ */
+.delta{font-variant-numeric:tabular-nums;font-weight:500;white-space:nowrap}
+.pos{color:var(--fg)}
+.neg{color:var(--red)}
+.flat{color:var(--muted)}
+
+/* Tablas densas */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.table{width:100%;border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums}
+.table th{
+  font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+  text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);white-space:nowrap
+}
+.table td{padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:middle}
+.table tbody tr:last-child td{border-bottom:none}
+.table .r{text-align:right}
+.table tbody tr.clickable{cursor:pointer}
+.table tbody tr.clickable:hover td{background:var(--sidebar)}
+.table tbody tr.selected td{background:var(--bg)}
+.table td:first-child{border-radius:var(--r-nested) 0 0 var(--r-nested)}
+.table td:last-child{border-radius:0 var(--r-nested) var(--r-nested) 0}
+.tick{font-weight:600}
+.sub{font-size:12px;color:var(--muted);max-width:220px}
+.empty{padding:32px 12px;text-align:center;color:var(--muted)}
+.spark{display:block}
+
+/* =====================================================================
+   5. VISTA MERCADO
+   ===================================================================== */
+.market-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+.chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.sym-row{display:flex;align-items:center;gap:8px}
+.sym-row h1{margin:0;font-size:24px;font-weight:600;letter-spacing:-0.025em;line-height:1.2}
+.sym-name{color:var(--muted);margin-top:2px}
+.price-row{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-top:8px}
+.price-big{font-size:36px;font-weight:600;letter-spacing:-0.025em;line-height:1.1;font-variant-numeric:tabular-nums}
+.chart-controls{display:flex;gap:8px;flex-wrap:wrap}
+.chart-wrap{position:relative;height:420px;margin-top:16px}
+#chart,#equityChart,#chChart{position:absolute;inset:0}
+.chart-overlay{
+  position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;
+  background:var(--veil);color:var(--muted);border-radius:var(--r-nested);z-index:3
+}
+.chart-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted);min-height:22px}
+.chart-foot b{color:var(--fg);font-weight:500}
+
+.order-card{display:flex;flex-direction:column;gap:8px;position:sticky;top:80px}
+.order-card .label{margin-top:8px}
+.stepper{display:grid;grid-template-columns:36px minmax(0,1fr) 36px auto;gap:8px}
+.stepper .input{text-align:center}
+.round-btn{width:36px;height:36px;border-radius:var(--r-pill);border:none;background:var(--bg);display:grid;place-items:center;color:var(--fg)}
+.round-btn:hover{background:var(--border)}
+.summary{margin:8px 0 0;padding:12px;border-radius:var(--r-nested);background:var(--sidebar);border:1px solid var(--border)}
+.sum-row{display:flex;justify-content:space-between;gap:8px;padding:3px 0}
+.sum-row dt{color:var(--muted)}
+.sum-row dd{margin:0;font-variant-numeric:tabular-nums}
+.sum-row.total{border-top:1px solid var(--border);margin-top:6px;padding-top:9px;font-weight:600}
+.sum-row.total dt{color:var(--fg)}
+.pos-info{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+
+/* =====================================================================
+   6. CARTERA / ÓRDENES / AJUSTES
+   ===================================================================== */
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.metric{display:flex;flex-direction:column;gap:6px}
+.metric-value{font-size:36px;font-weight:600;letter-spacing:-0.025em;line-height:1.1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.metric-value.neg{color:var(--red)}
+.metric-sub{font-size:12px;color:var(--muted)}
+.equity-wrap{position:relative;height:300px}
+
+.settings-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.key-row{display:flex;gap:8px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.danger{border-color:var(--border)}
+.danger .card-title{color:var(--red)}
+
+/* Pantalla completa del gráfico (tecla F) */
+.fs-only{display:none!important}
+body.fs-mode{overflow:hidden}
+.fs-card.fs-active{
+  position:fixed;inset:0;z-index:45;border-radius:0;border:none;box-shadow:none;
+  display:flex;flex-direction:column;padding:16px 20px calc(12px + env(safe-area-inset-bottom))
+}
+.fs-card.fs-active .chart-wrap{flex:1;height:auto;min-height:0}
+.fs-card.fs-active .fs-only{display:flex!important}
+.fs-bar,.trade-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.btn.xs{height:28px;padding:0 12px;font-size:13px}
+.mini-qty{display:flex;align-items:center;gap:4px}
+.mini-qty .input{width:72px;height:28px;padding:0 8px;text-align:center}
+.mini-qty .round-btn{width:28px;height:28px}
+.fs-info{font-size:12px;color:var(--muted);margin-left:auto}
+.fs-info kbd{font-size:11px;line-height:16px}
+@media (max-width:768px){ #chKeys{display:none} }
+
+/* Guía */
+.guide-lead{max-width:760px}
+.guide-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.guide-stats .h-xl.neg{color:var(--red)}
+.guide-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.guide-card{display:flex;flex-direction:column;gap:8px}
+.guide-card h3{margin:0;font-size:20px;font-weight:600;letter-spacing:-0.025em;line-height:1.3}
+.guide-wide{grid-column:1 / -1}
+.guide-head{display:flex;gap:8px;flex-wrap:wrap}
+.guide-dl{margin:4px 0 0;padding:12px;border-radius:var(--r-nested);background:var(--sidebar);border:1px solid var(--border);display:grid;grid-template-columns:120px 1fr;gap:8px 12px}
+.guide-dl dt{font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding-top:1px}
+.guide-dl dd{margin:0}
+.guide-split{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;align-items:start}
+.guide-rules{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px}
+.guide-rules li::marker{color:var(--muted);font-variant-numeric:tabular-nums}
+.calc-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.bias-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.bias{padding:12px;border-radius:var(--r-nested);background:var(--sidebar);border:1px solid var(--border);display:flex;flex-direction:column;gap:4px}
+.src{font-size:12px;color:var(--muted);text-decoration:none;font-variant-numeric:tabular-nums}
+.src:hover{color:var(--fg);text-decoration:underline}
+.sources{margin:0;padding-left:24px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.sources li{scroll-margin-top:80px}
+.sources li:target{background:var(--bg);border-radius:var(--r-nested)}
+.sources a{color:var(--fg);word-break:break-all}
+@media (max-width:1100px){
+  .guide-split{grid-template-columns:minmax(0,1fr)}
+  .bias-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:768px){
+  .guide-stats,.guide-grid,.bias-grid{grid-template-columns:minmax(0,1fr)}
+  .guide-dl{grid-template-columns:minmax(0,1fr);gap:2px}
+  .guide-dl dd{margin-bottom:8px}
+  .guide-stats .h-xl{font-size:36px}
+}
+
+/* =====================================================================
+   7. PALETA DE COMANDOS, DIÁLOGOS Y TOASTS
+   ===================================================================== */
+.overlay{position:fixed;inset:0;z-index:50;background:var(--overlay);display:flex;justify-content:center;align-items:flex-start;padding:12vh 16px 16px}
+.palette{width:min(600px,100%);padding:0;overflow:hidden}
+.palette-input{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--border);color:var(--muted)}
+.palette-input input{flex:1;min-width:0;border:none;outline:none;background:transparent;height:100%;color:var(--fg)}
+.palette-input input::placeholder{color:var(--muted)}
+.palette-list{max-height:min(380px,55vh);overflow-y:auto;padding:8px}
+.pal-group{padding:8px 10px 4px}
+.pal-item{display:flex;align-items:center;gap:12px;height:44px;padding:0 6px 0 10px;border-radius:var(--r-nested);cursor:pointer}
+.pal-item.active{background:var(--bg)}
+.pal-item .tick{min-width:72px}
+.pal-name{flex:1;min-width:0;color:var(--muted)}
+.pal-meta{font-size:12px;color:var(--muted)}
+.pal-empty{padding:24px 10px;text-align:center;color:var(--muted)}
+.palette-foot{display:flex;gap:16px;flex-wrap:wrap;padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);background:var(--sidebar)}
+.palette-foot span{display:inline-flex;gap:4px;align-items:center}
+
+.dialog{width:min(440px,100%);margin-top:6vh;display:flex;flex-direction:column;gap:8px}
+.dialog h2{margin:0;font-size:24px;font-weight:600;letter-spacing:-0.025em;line-height:1.2}
+.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap}
+
+/* Notificaciones: centradas en la parte superior */
+.toasts{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;align-items:center;gap:8px;width:min(360px,calc(100vw - 32px));pointer-events:none}
+.toast{width:100%;pointer-events:auto;text-align:center}
+.toast{background:var(--card);border:1px solid var(--border);border-radius:var(--r-pill);box-shadow:var(--shadow);padding:12px 16px;animation:toastIn .18s ease-out}
+.toast.out{opacity:0;transform:translateY(-4px);transition:all .2s}
+.toast-title{font-weight:500}
+.toast-desc{font-size:12px;color:var(--muted)}
+.toast.error .toast-title{color:var(--red)}
+@keyframes toastIn{from{opacity:0;transform:translateY(-6px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin 1s linear infinite}
+
+/* Menú inferior (solo móvil) */
+.bottomnav{display:none}
+
+/* =====================================================================
+   8. RESPONSIVE
+   ===================================================================== */
+@media (max-width:1200px){
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:1100px){
+  .market-grid{grid-template-columns:minmax(0,1fr)}
+  .order-card{position:static}
+  .settings-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:768px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .sidebar{display:none}
+  .topbar{padding:0 16px}
+  .crumbs .hide-sm{display:none}
+  .search-trigger{width:auto;padding:0 12px}
+  .search-trigger .search-text,.search-trigger kbd{display:none}
+  .content{padding:16px 16px 104px}
+  .view{gap:32px}
+  .metric-value{font-size:24px}
+  .price-big{font-size:30px}
+  .chart-wrap{height:300px}
+  .h1{font-size:24px}
+  .hide-sm{display:none}
+  .bottomnav{
+    display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;
+    background:var(--sidebar);border-top:1px solid var(--border);padding:6px 8px calc(6px + env(safe-area-inset-bottom))
+  }
+  .bottomnav a{
+    flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 4px;border-radius:var(--r-nested);
+    font-size:12px;font-weight:500;color:var(--muted);text-decoration:none
+  }
+  .bottomnav a.active{color:var(--fg);background:var(--card);box-shadow:var(--shadow)}
+}
+@media (max-width:420px){
+  .metrics{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR (escritorio) ============ -->
+  <aside class="sidebar" aria-label="Navegación principal">
+    <div class="brand">
+      <div class="logo"><span data-icon="activity" data-size="18"></span></div>
+      <div><div class="brand-name">Papertrade</div><div class="brand-sub">Simulador de bolsa</div></div>
+    </div>
+    <nav class="nav">
+      <div class="label">Navegación</div>
+      <a href="#mercado" data-nav="market"><span data-icon="candles"></span>Mercado</a>
+      <a href="#cartera" data-nav="portfolio"><span data-icon="briefcase"></span>Cartera</a>
+      <a href="#ordenes" data-nav="orders"><span data-icon="list"></span>Órdenes<span class="nav-count badge badge-solid" id="pendingCount" hidden></span></a>
+      <a href="#reto" data-nav="challenge" hidden><span data-icon="trophy"></span>Reto</a>
+      <a href="#guia" data-nav="guide"><span data-icon="book"></span>Guía</a>
+      <a href="#ajustes" data-nav="settings"><span data-icon="settings"></span>Ajustes</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="status" id="statusBox"></div>
+      <p class="side-disclaimer">Simulador educativo. No es asesoramiento financiero.</p>
+    </div>
+  </aside>
+
+  <div class="main">
+    <!-- ============ HEADER ============ -->
+    <header class="topbar">
+      <nav class="crumbs" aria-label="Ruta">
+        <span class="hide-sm">Simulador</span><span class="hide-sm" data-icon="chevron" data-size="14"></span>
+        <span id="crumbView" class="current">Mercado</span>
+        <span id="crumbSymWrap"><span data-icon="chevron" data-size="14" style="display:inline-block;vertical-align:-2px"></span> <span id="crumbSym" class="current"></span></span>
+      </nav>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="search-trigger" id="openPalette" aria-label="Buscar acciones">
+          <span data-icon="search"></span><span class="search-text">Buscar acciones…</span><kbd id="kbdHint">⌘K</kbd>
+        </button>
+        <button class="icon-btn" id="themeToggle" style="width:36px;height:36px" aria-label="Cambiar tema" title="Cambiar tema"></button>
+      </div>
+    </header>
+    <div class="disclaimer-bar" role="note"><span data-icon="info" data-size="14"></span>Simulador educativo. No es asesoramiento financiero. Dinero virtual en euros, precios de mercado reales.</div>
+
+    <main class="content">
+      <!-- Aviso de modo demo -->
+      <div class="banner" id="demoBanner" hidden>
+        <span class="badge badge-solid">DEMO</span>
+        <p><b>Modo demo con datos simulados.</b> <span class="muted">Los precios no son reales. Añade una API key gratuita de Finnhub para operar con cotizaciones de mercado.</span></p>
+        <a class="btn btn-outline sm" href="#ajustes"><span data-icon="key" data-size="14"></span>Configurar API key</a>
+      </div>
+
+      <!-- ============ VISTA: MERCADO ============ -->
+      <section class="view" data-view="market">
+        <div class="market-grid">
+          <!-- Gráfico (se puede poner a pantalla completa con F) -->
+          <div class="card fs-card" id="chartCard">
+            <div class="chart-head">
+              <div style="min-width:0">
+                <div class="sym-row">
+                  <h1 id="symTitle">—</h1>
+                  <span class="badge badge-outline" id="symBadge" hidden></span>
+                  <button class="icon-btn" id="watchToggle" aria-label="Añadir a la lista de seguimiento"><span data-icon="star"></span></button>
+                </div>
+                <div class="sym-name ellipsis" id="symName"></div>
+                <div class="price-row"><span class="price-big" id="symPrice">—</span><span id="symChange"></span></div>
+                <div class="hint num" id="symNative"></div>
+              </div>
+              <div class="chart-controls">
+                <div class="segmented" id="rangeSeg" role="group" aria-label="Rango temporal">
+                  <button data-range="1D">1D</button><button data-range="1S">1S</button><button data-range="1M">1M</button><button data-range="6M">6M</button><button data-range="1A">1A</button>
+                </div>
+                <div class="segmented" id="typeSeg" role="group" aria-label="Tipo de gráfico">
+                  <button data-ctype="candle" aria-label="Velas" title="Velas"><span data-icon="candles"></span></button>
+                  <button data-ctype="line" aria-label="Línea" title="Línea"><span data-icon="lineChart"></span></button>
+                </div>
+                <button class="icon-btn fs-btn" data-fs style="width:36px;height:36px" aria-label="Pantalla completa (F)" title="Pantalla completa (F)"></button>
+              </div>
+            </div>
+            <div class="chart-wrap"><div id="chart"></div><div class="chart-overlay" id="chartOverlay" hidden></div></div>
+            <div class="chart-foot"><span id="chartNote"></span><span id="ohlc" class="num"></span></div>
+            <!-- Barra compacta de compra/venta, solo visible a pantalla completa -->
+            <div class="fs-bar fs-only">
+              <div class="mini-qty">
+                <button type="button" class="round-btn" data-mq="-1" aria-label="Restar"><span data-icon="minus" data-size="14"></span></button>
+                <input class="input num" id="fsQty" type="number" min="1" step="1" value="1" inputmode="numeric" aria-label="Cantidad">
+                <button type="button" class="round-btn" data-mq="1" aria-label="Sumar"><span data-icon="plus" data-size="14"></span></button>
+              </div>
+              <button class="btn btn-primary xs" id="fsBuy">Comprar</button>
+              <button class="btn btn-destructive xs" id="fsSell">Vender</button>
+              <span class="fs-info num" id="fsInfo"></span>
+              <button class="btn btn-outline xs" data-fs-exit>Salir <kbd>F</kbd></button>
+            </div>
+          </div>
+
+          <!-- Panel de orden -->
+          <form class="card order-card" id="orderForm" autocomplete="off" novalidate>
+            <div class="card-head" style="margin-bottom:4px"><div class="card-title">Nueva orden</div><span class="badge badge-outline" id="orderSym">—</span></div>
+            <div class="segmented full" id="sideSeg" role="group" aria-label="Lado">
+              <button type="button" data-side="buy">Comprar</button><button type="button" data-side="sell">Vender</button>
+            </div>
+            <div class="label">Tipo de orden</div>
+            <div class="segmented full" id="otypeSeg" role="group" aria-label="Tipo de orden">
+              <button type="button" data-otype="market">Mercado</button><button type="button" data-otype="limit">Límite</button><button type="button" data-otype="stop" id="stopBtn">Stop-loss</button>
+            </div>
+            <label class="label" for="qtyInput">Cantidad (acciones)</label>
+            <div class="stepper">
+              <button type="button" class="round-btn" id="qtyMinus" aria-label="Restar"><span data-icon="minus"></span></button>
+              <input class="input num" id="qtyInput" type="number" min="1" step="1" value="1" inputmode="numeric">
+              <button type="button" class="round-btn" id="qtyPlus" aria-label="Sumar"><span data-icon="plus"></span></button>
+              <button type="button" class="btn btn-secondary" id="qtyMax">Máx.</button>
+            </div>
+            <div id="triggerField" class="field" hidden>
+              <label class="label" for="triggerInput" id="triggerLabel" style="margin-top:8px">Precio límite</label>
+              <input class="input num" id="triggerInput" type="number" min="0" step="0.01" inputmode="decimal">
+              <div class="hint" id="triggerHint"></div>
+            </div>
+            <dl class="summary">
+              <div class="sum-row"><dt>Precio de mercado</dt><dd id="sumMarket">—</dd></div>
+              <div class="sum-row"><dt id="sumRefLabel">Precio estimado</dt><dd id="sumRef">—</dd></div>
+              <div class="sum-row"><dt>Subtotal</dt><dd id="sumSub">—</dd></div>
+              <div class="sum-row"><dt>Comisión (0,1 %)</dt><dd id="sumFee">—</dd></div>
+              <div class="sum-row total"><dt id="sumTotalLabel">Coste estimado</dt><dd id="sumTotal">—</dd></div>
+            </dl>
+            <div class="pos-info"><span>Disponible</span><span class="num" id="availText">—</span></div>
+            <div class="pos-info" id="posInfo" hidden></div>
+            <div class="form-error" id="orderError" role="alert"></div>
+            <button type="submit" class="btn btn-primary full" id="submitOrder">Comprar</button>
+          </form>
+        </div>
+
+        <!-- Watchlist -->
+        <div class="card">
+          <div class="card-head">
+            <div><div class="card-title">Lista de seguimiento</div><div class="card-sub" id="watchCount"></div></div>
+            <button class="btn btn-outline sm" id="addWatch"><span data-icon="plus" data-size="14"></span>Añadir valor</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Valor</th><th class="hide-sm">Tendencia</th><th class="r">Precio</th><th class="r">Var. día</th><th class="r"><span class="hide-sm">Acciones</span></th></tr></thead>
+              <tbody id="watchBody"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="watchEmpty" hidden>Tu lista está vacía. Pulsa <kbd class="kbd-dyn">⌘K</kbd> para buscar valores.</div>
+        </div>
+      </section>
+
+      <!-- ============ VISTA: CARTERA ============ -->
+      <section class="view" data-view="portfolio" hidden>
+        <div class="stack">
+          <div class="page-head">
+            <div><div class="eyebrow">Cartera</div><h1 class="h1">Resumen de la cuenta</h1></div>
+            <button class="btn btn-outline-destructive" data-action="reset"><span data-icon="rotate" data-size="14"></span>Reiniciar cuenta</button>
+          </div>
+          <div class="metrics">
+            <div class="card metric"><div class="label">Efectivo</div><div class="metric-value" id="mCash">—</div><div class="metric-sub" id="mCashSub"></div></div>
+            <div class="card metric"><div class="label">Valor total</div><div class="metric-value" id="mEquity">—</div><div class="metric-sub" id="mEquitySub"></div></div>
+            <div class="card metric"><div class="label">P&amp;L del día</div><div class="metric-value" id="mDay">—</div><div class="metric-sub" id="mDaySub"></div></div>
+            <div class="card metric"><div class="label">P&amp;L total</div><div class="metric-value" id="mTotal">—</div><div class="metric-sub" id="mTotalSub"></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><div class="card-title">Evolución del valor de la cartera</div><div class="card-sub">Efectivo + posiciones a precio de mercado. Línea discontinua: capital inicial.</div></div></div>
+          <div class="equity-wrap"><div id="equityChart"></div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><div class="card-title">Posiciones abiertas</div><div class="card-sub" id="posCount"></div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Ticker</th><th class="r">Cantidad</th><th class="r">Precio medio</th><th class="r">Precio actual</th><th class="r">Valor</th><th class="r">P&amp;L €</th><th class="r">P&amp;L %</th></tr></thead>
+              <tbody id="posBody"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="posEmpty" hidden>No tienes posiciones abiertas. Busca un valor y lanza tu primera orden.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><div class="card-title">Historial de operaciones</div><div class="card-sub">Órdenes ejecutadas, de la más reciente a la más antigua.</div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Fecha y hora</th><th>Ticker</th><th>Operación</th><th>Tipo</th><th class="r">Cantidad</th><th class="r">Precio</th><th class="r">Comisión</th><th class="r">Importe</th><th class="r">P&amp;L realizado</th></tr></thead>
+              <tbody id="histBody"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="histEmpty" hidden>Aún no hay operaciones ejecutadas.</div>
+        </div>
+      </section>
+
+      <!-- ============ VISTA: ÓRDENES ============ -->
+      <section class="view" data-view="orders" hidden>
+        <div class="page-head">
+          <div><div class="eyebrow">Órdenes</div><h1 class="h1">Libro de órdenes</h1></div>
+          <div class="segmented" id="ordersFilter" role="group" aria-label="Filtrar órdenes">
+            <button data-filter="all">Todas</button><button data-filter="pending">Pendientes</button><button data-filter="filled">Ejecutadas</button><button data-filter="cancelled">Canceladas</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><div class="card-title" id="ordersTitle">Todas las órdenes</div><div class="card-sub">Las órdenes límite y stop se ejecutan automáticamente cuando el precio las alcanza.</div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Creada</th><th>Ticker</th><th>Lado</th><th>Tipo</th><th class="r">Cantidad</th><th class="r">Activación</th><th class="r">Ejecución</th><th>Estado</th><th class="r"></th></tr></thead>
+              <tbody id="ordersBody"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="ordersEmpty" hidden>No hay órdenes en esta categoría.</div>
+        </div>
+      </section>
+
+      <!-- ============ VISTA: MODO RETO ============ -->
+      <section class="view" data-view="challenge" hidden>
+        <div class="stack">
+          <div class="page-head">
+            <div><div class="eyebrow">Modo reto</div><h1 class="h1">¿Le ganas a «comprar y mantener»?</h1></div>
+            <button class="btn btn-outline" id="chNew"><span data-icon="rotate" data-size="14"></span>Nuevo reto</button>
+          </div>
+          <p class="muted guide-lead">Operas un valor oculto avanzando vela a vela (cada vela es un día), sin ver el futuro. Tienes una cuenta aparte de 10.000,00 € y la misma comisión del 0,1 %. Al terminar se revela el valor y se compara tu resultado con haber comprado el primer día y no haber tocado nada.</p>
+          <div class="metrics">
+            <div class="card metric"><div class="label">Efectivo del reto</div><div class="metric-value" id="chCash">—</div><div class="metric-sub" id="chCashSub"></div></div>
+            <div class="card metric"><div class="label">Posición</div><div class="metric-value" id="chPos">—</div><div class="metric-sub" id="chPosSub"></div></div>
+            <div class="card metric"><div class="label">Tu resultado</div><div class="metric-value" id="chRet">—</div><div class="metric-sub" id="chRetSub"></div></div>
+            <div class="card metric"><div class="label">Comprar y mantener</div><div class="metric-value" id="chBh">—</div><div class="metric-sub">Comprar el primer día y no vender</div></div>
+          </div>
+        </div>
+
+        <div class="card fs-card" id="chCard">
+          <div class="chart-head">
+            <div>
+              <div class="sym-row"><h1 id="chSym">Valor oculto</h1><span class="badge badge-outline" id="chBadge"></span></div>
+              <div class="sym-name" id="chProgress"></div>
+              <div class="price-row"><span class="price-big" id="chPrice">—</span><span id="chDayChg"></span></div>
+            </div>
+            <div class="chart-controls">
+              <div class="segmented" id="chSpeed" role="group" aria-label="Velocidad">
+                <button data-speed="1">1×</button><button data-speed="2">2×</button><button data-speed="4">4×</button>
+              </div>
+              <button class="btn btn-secondary sm" id="chPlay"></button>
+              <button class="btn btn-primary sm" id="chNext"><span data-icon="stepForward" data-size="14"></span>Siguiente vela</button>
+              <button class="icon-btn fs-btn" data-fs style="width:36px;height:36px" aria-label="Pantalla completa (F)" title="Pantalla completa (F)"></button>
+            </div>
+          </div>
+          <div class="chart-wrap"><div id="chChart"></div><div class="chart-overlay" id="chOverlay" hidden></div></div>
+          <div class="trade-bar">
+            <div class="mini-qty">
+              <button type="button" class="round-btn" data-cq="-1" aria-label="Restar"><span data-icon="minus" data-size="14"></span></button>
+              <input class="input num" id="chQty" type="number" min="1" step="1" value="10" inputmode="numeric" aria-label="Cantidad">
+              <button type="button" class="round-btn" data-cq="1" aria-label="Sumar"><span data-icon="plus" data-size="14"></span></button>
+            </div>
+            <button class="btn btn-secondary xs" id="chMax">Máx.</button>
+            <button class="btn btn-primary xs" id="chBuy">Comprar</button>
+            <button class="btn btn-destructive xs" id="chSell">Vender</button>
+            <span class="fs-info" id="chKeys"><kbd>→</kbd> siguiente · <kbd>Espacio</kbd> auto · <kbd>B</kbd> comprar · <kbd>S</kbd> vender · <kbd>F</kbd> pantalla completa</span>
+            <button class="btn btn-outline xs" id="chFinish">Terminar reto</button>
+          </div>
+        </div>
+
+        <div class="card stack" id="chResult" hidden></div>
+
+        <div class="card">
+          <div class="card-head"><div><div class="card-title">Operaciones de este reto</div><div class="card-sub">Ejecutadas al cierre de la vela actual.</div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Vela</th><th>Operación</th><th class="r">Cantidad</th><th class="r">Precio</th><th class="r">Comisión</th><th class="r">P&amp;L realizado</th></tr></thead>
+              <tbody id="chTradesBody"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="chTradesEmpty">Aún no has operado en este reto.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><div class="card-title">Tus retos anteriores</div><div class="card-sub" id="chHistSub"></div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Fecha</th><th>Valor</th><th>Datos</th><th class="r">Velas</th><th class="r">Operaciones</th><th class="r">Tu resultado</th><th class="r">Comprar y mantener</th><th>Veredicto</th></tr></thead>
+              <tbody id="chHistBody"></tbody>
+            </table>
+          </div>
+          <div class="empty" id="chHistEmpty">Cuando termines un reto aparecerá aquí.</div>
+        </div>
+      </section>
+
+      <!-- ============ VISTA: GUÍA ============ -->
+      <section class="view" data-view="guide" hidden>
+        <div class="stack">
+          <div class="page-head">
+            <div><div class="eyebrow">Guía</div><h1 class="h1">Estrategias y buenas prácticas de trading</h1></div>
+          </div>
+          <p class="muted guide-lead">Resumen de las estrategias más usadas en los mercados y de las reglas de gestión del riesgo que recomiendan reguladores e investigación académica. Cada apartado cita su fuente al final de la página. Ninguna estrategia garantiza beneficios: úsalas aquí, con dinero virtual, para entender cómo se comportan.</p>
+        </div>
+
+        <!-- Lo que dicen los datos -->
+        <div class="stack">
+          <div class="card-title">Lo que dicen los datos antes de empezar</div>
+          <div class="guide-stats">
+            <div class="card metric">
+              <div class="label">Day traders en Brasil</div>
+              <div class="h-xl num neg">97 %</div>
+              <p class="muted">de quienes hicieron day trading más de 300 días perdió dinero; solo el 1,1 % ganó más que el salario mínimo. <a href="#src-chague" class="src">[1]</a></p>
+            </div>
+            <div class="card metric">
+              <div class="label">Cuentas minoristas de CFD</div>
+              <div class="h-xl num neg">74–89 %</div>
+              <p class="muted">de las cuentas de pequeños inversores en CFD pierde dinero, según el regulador europeo. <a href="#src-esma" class="src">[2]</a></p>
+            </div>
+            <div class="card metric">
+              <div class="label">Day traders en Taiwán</div>
+              <div class="h-xl num neg">&lt; 1 %</div>
+              <p class="muted">consigue beneficios de forma predecible y sostenida una vez descontadas las comisiones. <a href="#src-blo" class="src">[3]</a></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Estrategias -->
+        <div class="stack">
+          <div><div class="card-title">Estrategias más utilizadas</div><div class="card-sub">De menor a mayor frecuencia de operación.</div></div>
+          <div class="guide-grid">
+            <article class="card guide-card">
+              <div class="guide-head"><span class="badge badge-outline">Largo plazo</span><span class="badge badge-muted">Riesgo bajo–medio</span></div>
+              <h3>Comprar y mantener (buy &amp; hold) e indexación</h3>
+              <p>Comprar una cartera diversificada, a menudo un fondo índice como el S&amp;P 500, y mantenerla durante años, con pocas operaciones.</p>
+              <dl class="guide-dl">
+                <dt>Por qué funciona</dt><dd>Los informes SPIVA muestran que, a 10–15 años, la gran mayoría de los fondos de gestión activa no supera a su índice de referencia. Operar menos también reduce comisiones: los hogares que más operaban obtuvieron un 11,4 % anual frente al 17,9 % del mercado. <a href="#src-spiva" class="src">[4]</a> <a href="#src-bo" class="src">[5]</a></dd>
+                <dt>Riesgos</dt><dd>Caídas profundas del mercado que pueden durar años.</dd>
+                <dt>Practícalo aquí</dt><dd>Compra SPY o QQQ a mercado y no toques la posición; compara su P&amp;L con tus operaciones activas.</dd>
+              </dl>
+            </article>
+
+            <article class="card guide-card">
+              <div class="guide-head"><span class="badge badge-outline">Largo plazo</span><span class="badge badge-muted">Riesgo bajo–medio</span></div>
+              <h3>Promediar el coste (DCA)</h3>
+              <p>Invertir la misma cantidad a intervalos regulares (por ejemplo, cada mes), independientemente del precio.</p>
+              <dl class="guide-dl">
+                <dt>Por qué funciona</dt><dd>Elimina la necesidad de acertar el momento de entrada y compra más acciones cuando el precio está bajo. La SEC la describe como una forma de reducir el impacto de la volatilidad. <a href="#src-dca" class="src">[6]</a></dd>
+                <dt>Riesgos</dt><dd>No protege de pérdidas si el valor cae de forma sostenida.</dd>
+                <dt>Practícalo aquí</dt><dd>Invierte una cantidad fija de euros en un mismo valor cada semana y observa cómo cambia tu precio medio en la Cartera.</dd>
+              </dl>
+            </article>
+
+            <article class="card guide-card">
+              <div class="guide-head"><span class="badge badge-outline">Medio plazo</span><span class="badge badge-muted">Riesgo medio</span></div>
+              <h3>Momentum</h3>
+              <p>Comprar los valores que más han subido en los últimos 3–12 meses (y evitar o vender los que más han caído), esperando que la tendencia continúe.</p>
+              <dl class="guide-dl">
+                <dt>Evidencia</dt><dd>Jegadeesh y Titman (1993) hallaron rentabilidades anormales de alrededor del 1 % mensual con esta regla en acciones de EE. UU. El efecto tiende a revertirse a partir del primer año. <a href="#src-jt" class="src">[7]</a></dd>
+                <dt>Riesgos</dt><dd>Giros bruscos del mercado («momentum crashes») y alta rotación, que multiplica las comisiones.</dd>
+                <dt>Practícalo aquí</dt><dd>Usa el rango 6M o 1A para identificar los valores más fuertes de tu watchlist y revisa la cartera una vez al mes.</dd>
+              </dl>
+            </article>
+
+            <article class="card guide-card">
+              <div class="guide-head"><span class="badge badge-outline">Medio plazo</span><span class="badge badge-muted">Riesgo medio</span></div>
+              <h3>Seguimiento de tendencia (medias móviles)</h3>
+              <p>Estar comprado mientras el precio está por encima de su media móvil (por ejemplo, de 50 o 200 sesiones) y salir cuando la cruza a la baja.</p>
+              <dl class="guide-dl">
+                <dt>Evidencia</dt><dd>Brock, Lakonishok y LeBaron (1992) encontraron poder predictivo en reglas de medias móviles sobre el Dow Jones entre 1897 y 1986, sin contar costes de operación. Moskowitz, Ooi y Pedersen (2012) documentaron el «momentum de serie temporal» en 58 mercados de futuros. <a href="#src-bll" class="src">[8]</a> <a href="#src-mop" class="src">[9]</a></dd>
+                <dt>Riesgos</dt><dd>Muchas señales falsas en mercados laterales; la ventaja es menor tras comisiones.</dd>
+                <dt>Practícalo aquí</dt><dd>Con el gráfico en 6M, define tu regla de salida y protégela con una orden Stop-loss.</dd>
+              </dl>
+            </article>
+
+            <article class="card guide-card">
+              <div class="guide-head"><span class="badge badge-outline">Corto–medio plazo</span><span class="badge badge-muted">Riesgo medio–alto</span></div>
+              <h3>Reversión a la media</h3>
+              <p>Apostar a que un precio que se ha alejado mucho de su media volverá hacia ella: comprar tras caídas fuertes o vender tras subidas extremas. El RSI de Wilder (1978) es el indicador más popular para detectar sobrecompra y sobreventa.</p>
+              <dl class="guide-dl">
+                <dt>Evidencia</dt><dd>De Bondt y Thaler (1985) mostraron que las acciones más perdedoras de los 3–5 años anteriores superaron a las ganadoras en torno a un 25 % en los 36 meses siguientes. <a href="#src-dbt" class="src">[10]</a></dd>
+                <dt>Riesgos</dt><dd>«Intentar coger un cuchillo que cae»: un valor barato puede abaratarse mucho más.</dd>
+                <dt>Practícalo aquí</dt><dd>Usa órdenes Límite de compra por debajo del precio actual en lugar de comprar a mercado.</dd>
+              </dl>
+            </article>
+
+            <article class="card guide-card">
+              <div class="guide-head"><span class="badge badge-outline">Corto plazo</span><span class="badge badge-muted">Riesgo alto</span></div>
+              <h3>Ruptura de soportes y resistencias (breakout)</h3>
+              <p>Entrar cuando el precio supera con fuerza un nivel que antes le frenaba (resistencia) o perfora uno que le sostenía (soporte).</p>
+              <dl class="guide-dl">
+                <dt>Evidencia</dt><dd>Lo, Mamaysky y Wang (2000) concluyen, con métodos estadísticos, que algunos patrones técnicos aportan información adicional, aunque no prueban que generen beneficios tras costes. <a href="#src-lmw" class="src">[11]</a></dd>
+                <dt>Riesgos</dt><dd>Rupturas falsas que se dan la vuelta enseguida.</dd>
+                <dt>Practícalo aquí</dt><dd>Coloca una orden Stop de compra justo por encima de la resistencia: solo se ejecuta si el precio rompe.</dd>
+              </dl>
+            </article>
+
+            <article class="card guide-card guide-wide">
+              <div class="guide-head"><span class="badge badge-outline">Intradía</span><span class="badge badge-red">Riesgo muy alto</span></div>
+              <h3>Day trading y scalping</h3>
+              <p>Abrir y cerrar posiciones en el mismo día (o en segundos, en el scalping) para aprovechar movimientos pequeños.</p>
+              <dl class="guide-dl">
+                <dt>Evidencia</dt><dd>Es la estrategia con peores resultados documentados para el pequeño inversor (ver los datos de arriba). En EE. UU., FINRA exige 25.000 dólares de capital mínimo a los «pattern day traders» y advierte de sus riesgos. <a href="#src-chague" class="src">[1]</a> <a href="#src-blo" class="src">[3]</a> <a href="#src-finra" class="src">[12]</a></dd>
+                <dt>Riesgos</dt><dd>Las comisiones y el diferencial compra-venta se comen las ganancias; mucha presión emocional.</dd>
+                <dt>Practícalo aquí</dt><dd>Cada operación paga un 0,1 % de comisión: haz 20 operaciones intradía y mira en el Historial cuánto te han costado.</dd>
+              </dl>
+            </article>
+          </div>
+        </div>
+
+        <!-- Gestión del riesgo -->
+        <div class="guide-split">
+          <div class="card stack">
+            <div><div class="card-title">Los trucos que más usan los profesionales</div><div class="card-sub">Gestión del riesgo: más importante que la estrategia de entrada.</div></div>
+            <ol class="guide-rules">
+              <li><b>Arriesga solo un 1–2 % del capital por operación.</b> Así, diez pérdidas seguidas no te sacan del mercado.</li>
+              <li><b>Decide la salida antes de entrar.</b> Coloca un stop-loss al abrir la posición, no cuando ya pierdes. Un stop se ejecuta a mercado y puede llenarse peor que el precio fijado si el mercado salta. <a href="#src-stop" class="src">[13]</a></li>
+              <li><b>Busca una relación beneficio/riesgo de al menos 2:1.</b> Si arriesgas 1 €, que el objetivo sea ganar 2 €; así puedes acertar menos de la mitad de las veces y aun así ganar.</li>
+              <li><b>Calcula el tamaño de la posición</b> a partir del riesgo, no al revés (usa la calculadora).</li>
+              <li><b>Diversifica.</b> No concentres la cartera en un solo valor o sector.</li>
+              <li><b>Opera menos.</b> Más operaciones significan más comisiones y, de media, peores resultados. <a href="#src-bo" class="src">[5]</a></li>
+              <li><b>Nunca arriesgues el máximo teórico.</b> El criterio de Kelly calcula la fracción óptima del capital que apostar; en la práctica se usa una fracción de él (½ o ¼ de Kelly) por la incertidumbre. <a href="#src-kelly" class="src">[14]</a></li>
+              <li><b>Lleva un diario de operaciones:</b> por qué entraste, dónde estaba tu stop y qué aprendiste. El Historial de este simulador te sirve de base.</li>
+            </ol>
+          </div>
+
+          <!-- Calculadora de tamaño de posición -->
+          <div class="card stack" id="calc">
+            <div><div class="card-title">Calculadora de tamaño de posición</div><div class="card-sub">Cuántas acciones comprar para arriesgar solo el % que elijas.</div></div>
+            <div class="calc-grid">
+              <div class="field"><label class="label" for="cCapital">Capital (€)</label><input class="input num" id="cCapital" type="number" min="0" step="1" inputmode="decimal"></div>
+              <div class="field"><label class="label" for="cRisk">Riesgo por operación (%)</label><input class="input num" id="cRisk" type="number" min="0.1" max="100" step="0.1" value="1" inputmode="decimal"></div>
+              <div class="field"><label class="label" for="cEntry">Precio de entrada</label><input class="input num" id="cEntry" type="number" min="0" step="0.01" inputmode="decimal"></div>
+              <div class="field"><label class="label" for="cStop">Precio del stop-loss</label><input class="input num" id="cStop" type="number" min="0" step="0.01" inputmode="decimal"></div>
+            </div>
+            <dl class="summary" style="margin:0">
+              <div class="sum-row"><dt>Riesgo máximo</dt><dd id="cRiskAmt">—</dd></div>
+              <div class="sum-row"><dt>Riesgo por acción</dt><dd id="cPerShare">—</dd></div>
+              <div class="sum-row"><dt>Coste de la posición</dt><dd id="cCost">—</dd></div>
+              <div class="sum-row"><dt>Objetivo 2:1</dt><dd id="cTarget">—</dd></div>
+              <div class="sum-row total"><dt>Acciones a comprar</dt><dd id="cShares">—</dd></div>
+            </dl>
+            <div class="form-error" id="cError"></div>
+            <button class="btn btn-primary full" id="cApply" disabled>Llevar al panel de orden</button>
+            <p class="hint" id="cHint">Se precarga con el valor que tienes seleccionado en Mercado.</p>
+          </div>
+        </div>
+
+        <!-- Sesgos -->
+        <div class="card stack">
+          <div><div class="card-title">Errores psicológicos más comunes</div><div class="card-sub">Sesgos documentados por las finanzas conductuales.</div></div>
+          <div class="bias-grid">
+            <div class="bias"><b>Efecto disposición</b><p class="muted">Vender pronto las acciones que ganan y aguantar las que pierden. Las acciones ganadoras que los inversores vendieron rindieron un 3,4 % más al año siguiente que las perdedoras que conservaron. <a href="#src-ss" class="src">[15]</a> <a href="#src-odean" class="src">[16]</a></p></div>
+            <div class="bias"><b>Exceso de confianza</b><p class="muted">Lleva a operar demasiado; es la explicación que dan Barber y Odean a los peores resultados de quienes más operan. <a href="#src-bo" class="src">[5]</a></p></div>
+            <div class="bias"><b>Aversión a la pérdida</b><p class="muted">Una pérdida duele más que una ganancia equivalente; por eso cuesta tanto ejecutar un stop. Ponlo como orden y deja que se active solo.</p></div>
+            <div class="bias"><b>Operar por venganza</b><p class="muted">Abrir una operación grande justo después de una pérdida para «recuperar». Fija un límite de pérdida diaria y respétalo.</p></div>
+          </div>
+        </div>
+
+        <!-- Fuentes -->
+        <div class="card stack">
+          <div><div class="card-title">Fuentes</div><div class="card-sub">Estudios revisados por pares y organismos reguladores.</div></div>
+          <ol class="sources">
+            <li id="src-chague">Chague, F., De-Losso, R. y Giovannetti, B. (2019). <i>Day Trading for a Living?</i> SSRN. <a href="https://doi.org/10.2139/ssrn.3423101" target="_blank" rel="noopener">doi:10.2139/ssrn.3423101</a></li>
+            <li id="src-esma">ESMA, Autoridad Europea de Valores y Mercados (2018). Prohibición de opciones binarias y restricción de los CFD. <a href="https://www.esma.europa.eu/press-news/esma-news/esma-agrees-prohibit-binary-options-and-restrict-cfds-protect-retail-investors" target="_blank" rel="noopener">esma.europa.eu</a></li>
+            <li id="src-blo">Barber, B., Lee, Y.-T., Liu, Y.-J. y Odean, T. (2014). The cross-section of speculator skill: Evidence from day trading. <i>Journal of Financial Markets</i>. <a href="https://doi.org/10.1016/j.finmar.2013.05.006" target="_blank" rel="noopener">doi:10.1016/j.finmar.2013.05.006</a></li>
+            <li id="src-spiva">S&amp;P Dow Jones Indices. Informes SPIVA (gestión activa frente a índices). <a href="https://www.spglobal.com/spdji/en/research-insights/spiva/" target="_blank" rel="noopener">spglobal.com/spiva</a></li>
+            <li id="src-bo">Barber, B. y Odean, T. (2000). Trading Is Hazardous to Your Wealth. <i>The Journal of Finance</i>. <a href="https://doi.org/10.1111/0022-1082.00226" target="_blank" rel="noopener">doi:10.1111/0022-1082.00226</a></li>
+            <li id="src-dca">SEC – Investor.gov. Dollar Cost Averaging (glosario). <a href="https://www.investor.gov/introduction-investing/investing-basics/glossary/dollar-cost-averaging" target="_blank" rel="noopener">investor.gov</a></li>
+            <li id="src-jt">Jegadeesh, N. y Titman, S. (1993). Returns to Buying Winners and Selling Losers. <i>The Journal of Finance</i>. <a href="https://doi.org/10.1111/j.1540-6261.1993.tb04702.x" target="_blank" rel="noopener">doi:10.1111/j.1540-6261.1993.tb04702.x</a></li>
+            <li id="src-bll">Brock, W., Lakonishok, J. y LeBaron, B. (1992). Simple Technical Trading Rules and the Stochastic Properties of Stock Returns. <i>The Journal of Finance</i>. <a href="https://doi.org/10.1111/j.1540-6261.1992.tb04681.x" target="_blank" rel="noopener">doi:10.1111/j.1540-6261.1992.tb04681.x</a></li>
+            <li id="src-mop">Moskowitz, T., Ooi, Y. H. y Pedersen, L. H. (2012). Time series momentum. <i>Journal of Financial Economics</i>. <a href="https://doi.org/10.1016/j.jfineco.2011.11.003" target="_blank" rel="noopener">doi:10.1016/j.jfineco.2011.11.003</a></li>
+            <li id="src-dbt">De Bondt, W. y Thaler, R. (1985). Does the Stock Market Overreact? <i>The Journal of Finance</i>. <a href="https://doi.org/10.1111/j.1540-6261.1985.tb05004.x" target="_blank" rel="noopener">doi:10.1111/j.1540-6261.1985.tb05004.x</a></li>
+            <li id="src-lmw">Lo, A., Mamaysky, H. y Wang, J. (2000). Foundations of Technical Analysis. <i>The Journal of Finance</i>. <a href="https://doi.org/10.1111/0022-1082.00265" target="_blank" rel="noopener">doi:10.1111/0022-1082.00265</a></li>
+            <li id="src-finra">FINRA. Day Trading (reglas y riesgos). <a href="https://www.finra.org/investors/investing/investment-products/stocks/day-trading" target="_blank" rel="noopener">finra.org</a></li>
+            <li id="src-stop">SEC – Investor.gov. Stop Order (glosario). <a href="https://www.investor.gov/introduction-investing/investing-basics/glossary/stop-order" target="_blank" rel="noopener">investor.gov</a></li>
+            <li id="src-kelly">Kelly, J. L. (1956). A New Interpretation of Information Rate. <i>Bell System Technical Journal</i>. <a href="https://doi.org/10.1002/j.1538-7305.1956.tb03809.x" target="_blank" rel="noopener">doi:10.1002/j.1538-7305.1956.tb03809.x</a></li>
+            <li id="src-ss">Shefrin, H. y Statman, M. (1985). The Disposition to Sell Winners Too Early and Ride Losers Too Long. <i>The Journal of Finance</i>. <a href="https://doi.org/10.1111/j.1540-6261.1985.tb05002.x" target="_blank" rel="noopener">doi:10.1111/j.1540-6261.1985.tb05002.x</a></li>
+            <li id="src-odean">Odean, T. (1998). Are Investors Reluctant to Realize Their Losses? <i>The Journal of Finance</i>. <a href="https://doi.org/10.1111/0022-1082.00072" target="_blank" rel="noopener">doi:10.1111/0022-1082.00072</a></li>
+          </ol>
+          <p class="hint">Para el inversor en España, la CNMV publica guías gratuitas en su <a href="https://www.cnmv.es/portal/inversor/Indice.aspx" target="_blank" rel="noopener">Portal del Inversor</a>. Simulador educativo. No es asesoramiento financiero.</p>
+        </div>
+      </section>
+
+      <!-- ============ VISTA: AJUSTES ============ -->
+      <section class="view" data-view="settings" hidden>
+        <div class="page-head"><div><div class="eyebrow">Ajustes</div><h1 class="h1">Datos de mercado y cuenta</h1></div></div>
+        <div class="settings-grid">
+          <div class="card stack">
+            <div><div class="card-title">API key de Finnhub</div>
+              <p class="muted" style="margin-top:4px">Crea una cuenta gratuita en <a href="https://finnhub.io/register" target="_blank" rel="noopener">finnhub.io</a> y pega aquí tu clave. Se guarda únicamente en este navegador (localStorage).</p></div>
+            <div class="field">
+              <label class="label" for="apiKeyInput">API key</label>
+              <div class="key-row">
+                <input class="input" id="apiKeyInput" type="password" placeholder="Pega tu API key…" spellcheck="false" autocomplete="off">
+                <button class="round-btn" id="toggleKey" type="button" aria-label="Mostrar u ocultar la clave"><span data-icon="eye"></span></button>
+              </div>
+              <div class="hint" id="keyStatus"></div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="saveKey">Guardar y conectar</button>
+              <button class="btn btn-secondary" id="testKey">Probar clave</button>
+              <button class="btn btn-outline" id="clearKey">Usar modo demo</button>
+            </div>
+          </div>
+
+          <div class="card stack">
+            <div class="card-title">Estado de la conexión</div>
+            <dl class="kv" id="connInfo" style="margin:0"></dl>
+            <p class="hint">El plan gratuito de Finnhub incluye cotizaciones y WebSocket de acciones de EE. UU. Si tu plan no incluye velas históricas o mercados internacionales (p. ej. SAN.MC), el gráfico mostrará un histórico simulado anclado al precio real y lo indicará.</p>
+          </div>
+
+          <div class="card stack">
+            <div><div class="card-title">Apariencia</div>
+              <p class="muted" style="margin-top:4px">«Sistema» sigue la configuración claro/oscuro de tu dispositivo.</p></div>
+            <div class="segmented full" id="themeSeg" role="group" aria-label="Tema">
+              <button data-theme-opt="system"><span data-icon="monitor" data-size="14"></span>Sistema</button>
+              <button data-theme-opt="light"><span data-icon="sun" data-size="14"></span>Claro</button>
+              <button data-theme-opt="dark"><span data-icon="moon" data-size="14"></span>Oscuro</button>
+            </div>
+          </div>
+
+          <div class="card stack">
+            <div><div class="card-title">Modo reto</div>
+              <p class="muted" style="margin-top:4px">Añade la pestaña «Reto»: practica con un valor oculto avanzando vela a vela, con una cuenta aparte que no afecta a tu cartera. Usa velas reales si tu plan de Finnhub las incluye; si no, una serie simulada.</p></div>
+            <div class="segmented full" id="chEnableSeg" role="group" aria-label="Modo reto">
+              <button data-ch-enable="0">Desactivado</button><button data-ch-enable="1">Activado</button>
+            </div>
+            <div class="field">
+              <div class="label">Duración del reto</div>
+              <div class="segmented full" id="chLenSeg" role="group" aria-label="Duración">
+                <button data-ch-len="60">60 velas</button><button data-ch-len="120">120 velas</button><button data-ch-len="250">250 velas</button>
+              </div>
+              <div class="hint">Se aplica al empezar un reto nuevo. Antes se muestran 60 velas previas como contexto.</div>
+            </div>
+          </div>
+
+          <div class="card stack danger">
+            <div><div class="card-title">Zona de peligro</div>
+              <p class="muted" style="margin-top:4px">Reiniciar la cuenta borra posiciones, órdenes, historial y la evolución de la cartera, y restablece el saldo a 10.000,00 €. Tu lista de seguimiento y tu API key se conservan.</p></div>
+            <div><button class="btn btn-destructive" data-action="reset"><span data-icon="rotate" data-size="14"></span>Reiniciar cuenta</button></div>
+          </div>
+
+          <div class="card stack">
+            <div class="card-title">Reglas del simulador</div>
+            <dl class="kv" style="margin:0">
+              <dt>Capital inicial</dt><dd>10.000,00 €</dd>
+              <dt>Comisión</dt><dd>0,1 % por operación</dd>
+              <dt>Fracciones</dt><dd>No (acciones enteras)</dd>
+              <dt>Divisa</dt><dd>Euro (€), con conversión al tipo de cambio del BCE</dd>
+            </dl>
+            <p class="hint">Simulador educativo. No es asesoramiento financiero.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ============ MENÚ INFERIOR (móvil) ============ -->
+  <nav class="bottomnav" aria-label="Navegación">
+    <a href="#mercado" data-nav="market"><span data-icon="candles" data-size="18"></span>Mercado</a>
+    <a href="#cartera" data-nav="portfolio"><span data-icon="briefcase" data-size="18"></span>Cartera</a>
+    <a href="#ordenes" data-nav="orders"><span data-icon="list" data-size="18"></span>Órdenes</a>
+    <a href="#reto" data-nav="challenge" hidden><span data-icon="trophy" data-size="18"></span>Reto</a>
+    <a href="#guia" data-nav="guide"><span data-icon="book" data-size="18"></span>Guía</a>
+    <a href="#ajustes" data-nav="settings"><span data-icon="settings" data-size="18"></span>Ajustes</a>
+  </nav>
+</div>
+
+<!-- ============ PALETA DE COMANDOS (⌘K) ============ -->
+<div class="overlay" id="palette" hidden>
+  <div class="card palette" role="dialog" aria-modal="true" aria-label="Buscar acciones">
+    <div class="palette-input">
+      <span data-icon="search"></span>
+      <input id="paletteInput" placeholder="Ticker o nombre: AAPL, Tesla, NVDA, SAN.MC…" spellcheck="false" autocomplete="off" role="combobox" aria-controls="paletteList" aria-expanded="true">
+      <span id="paletteSpinner" hidden><span data-icon="loader" data-size="14" class="spin"></span></span>
+      <kbd>Esc</kbd>
+    </div>
+    <div class="palette-list" id="paletteList" role="listbox"></div>
+    <div class="palette-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> navegar</span><span><kbd>↵</kbd> abrir</span><span><kbd>⇧</kbd><kbd>↵</kbd> seguir / dejar de seguir</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ DIÁLOGO DE CONFIRMACIÓN ============ -->
+<div class="overlay" id="confirm" hidden>
+  <div class="card dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+    <h2 id="confirmTitle"></h2>
+    <p class="muted" id="confirmText"></p>
+    <div class="dialog-actions">
+      <button class="btn btn-outline" id="confirmCancel">Cancelar</button>
+      <button class="btn btn-destructive" id="confirmOk">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+'use strict';
+/* =======================================================================
+   PAPERTRADE — simulador de trading con datos de Finnhub
+   Estructura:
+     1. Configuración y utilidades
+     2. Iconos (Lucide, SVG inline con trazo 1.5)
+     3. Estado persistente (localStorage)
+     4. Proveedores de datos: Finnhub (REST + WebSocket) y modo demo
+     5. Motor de órdenes y cartera
+     6. Gráficos (lightweight-charts)
+     7. Renderizado de la interfaz
+     8. Paleta de comandos, diálogos, toasts
+     9. Eventos e inicialización
+   ======================================================================= */
+
+/* ---------------------------------------------------------------------
+   1. CONFIGURACIÓN Y UTILIDADES
+   --------------------------------------------------------------------- */
+const START_CASH = 10000;
+const FEE_RATE   = 0.001;          // comisión simulada 0,1 %
+const POLL_MS    = 15000;          // polling cuando no hay WebSocket
+const DEMO_MS    = 2000;           // frecuencia de ticks en modo demo
+const SPARK_MAX  = 48;             // puntos por sparkline
+const LS_STATE   = 'papertrade.state.v1';
+const LS_KEY     = 'papertrade.finnhubKey';
+const FINNHUB    = 'https://finnhub.io/api/v1';
+
+/* Rangos del gráfico: resolución de Finnhub, duración, paso de cada vela y volatilidad para el histórico simulado */
+const RANGES = {
+  '1D': { res: '5',  secs: 86400,      step: 300,   n: 78,  vol: 0.0015 },
+  '1S': { res: '30', secs: 7 * 86400,  step: 1800,  n: 70,  vol: 0.0035 },
+  '1M': { res: '60', secs: 31 * 86400, step: 3600,  n: 150, vol: 0.005 },
+  '6M': { res: 'D',  secs: 183 * 86400, step: 86400, n: 126, vol: 0.016 },
+  '1A': { res: 'D',  secs: 366 * 86400, step: 86400, n: 252, vol: 0.016 },
+};
+
+/* Universo del modo demo (precios base ficticios) y sugerencias populares */
+const DEMO_UNIVERSE = [
+  ['AAPL','Apple Inc',228.5],['MSFT','Microsoft Corp',415.2],['NVDA','NVIDIA Corp',138.4],['TSLA','Tesla Inc',251.7],
+  ['AMZN','Amazon.com Inc',186.3],['GOOGL','Alphabet Inc Class A',167.9],['META','Meta Platforms Inc',563.1],
+  ['NFLX','Netflix Inc',712.4],['AMD','Advanced Micro Devices Inc',148.9],['INTC','Intel Corp',22.6],
+  ['JPM','JPMorgan Chase & Co',212.5],['V','Visa Inc',289.3],['KO','Coca-Cola Co',68.2],['DIS','Walt Disney Co',97.4],
+  ['BA','Boeing Co',158.1],['NKE','Nike Inc',78.6],['PLTR','Palantir Technologies Inc',41.2],['UBER','Uber Technologies Inc',74.6],
+  ['COIN','Coinbase Global Inc',204.5],['ASML','ASML Holding NV',712.3],['SPY','SPDR S&P 500 ETF Trust',571.2],
+  ['QQQ','Invesco QQQ Trust',489.6],['SAN.MC','Banco Santander SA',4.62],['BBVA.MC','Banco Bilbao Vizcaya Argentaria SA',9.35],
+  ['ITX.MC','Industria de Diseño Textil SA',52.1],['IBE.MC','Iberdrola SA',13.4],['TEF.MC','Telefónica SA',4.31],
+];
+const DEMO_MAP = Object.fromEntries(DEMO_UNIVERSE.map(([s, n, p]) => [s, { n, p }]));
+const POPULAR = ['AAPL','TSLA','NVDA','MSFT','AMZN','META','SAN.MC'];
+
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const round = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
+const nowSec = () => Math.floor(Date.now() / 1000);
+const todayKey = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-DD local
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+/* lightweight-charts trabaja en UTC: desplazamos los timestamps para mostrar hora local */
+const tzShift = t => t - new Date(t * 1000).getTimezoneOffset() * 60;
+
+/* Formato numérico español (10.000,00 €) */
+const NF = (min, max) => new Intl.NumberFormat('es-ES', { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: 'always' });
+const nf0 = NF(0, 0), nf2 = NF(2, 2), nf4 = NF(2, 4);
+const fmtNum   = v => (v == null || !isFinite(v)) ? '—' : (Math.abs(v) < 1 && v !== 0 ? nf4 : nf2).format(v);
+const fmtPrice = v => (v == null || !isFinite(v)) ? '—' : fmtNum(v) + ' €';
+const fmtMoney = v => (v == null || !isFinite(v)) ? '—' : (v < -0.004 ? '−' : '') + nf2.format(Math.abs(v)) + ' €';
+const fmtQty   = v => nf0.format(v);
+const dtFmt    = new Intl.DateTimeFormat('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtDate  = ms => dtFmt.format(new Date(ms));
+
+/* Variaciones: ▲ negro para ganancias, ▼ rojo para pérdidas */
+function deltaClass(v) { return v > 1e-9 ? 'pos' : v < -1e-9 ? 'neg' : 'flat'; }
+function arrow(v) { return v > 1e-9 ? '▲ ' : v < -1e-9 ? '▼ ' : ''; }
+function deltaPct(p)   { if (p == null || !isFinite(p)) return '<span class="flat">—</span>'; return `<span class="delta ${deltaClass(p)}">${arrow(p)}${nf2.format(Math.abs(p))} %</span>`; }
+function deltaMoney(v) { if (v == null || !isFinite(v)) return '<span class="flat">—</span>'; return `<span class="delta ${deltaClass(v)}">${arrow(v)}${nf2.format(Math.abs(v))} €</span>`; }
+function deltaBoth(d, p) {
+  if (d == null || !isFinite(d)) return '<span class="flat">—</span>';
+  return `<span class="delta ${deltaClass(d)}">${arrow(d)}${fmtNum(Math.abs(d))} € (${nf2.format(Math.abs(p))} %)</span>`;
+}
+
+/* PRNG determinista para históricos simulados reproducibles */
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function gaussFrom(rnd) { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+
+/* ---------------------------------------------------------------------
+   2. ICONOS — trazados de Lucide (ISC) con stroke-width 1.5
+   --------------------------------------------------------------------- */
+const ICONS = {
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  candles: '<path d="M9 5v4"/><rect width="4" height="6" x="7" y="9" rx="1"/><path d="M9 15v2"/><path d="M17 3v2"/><rect width="4" height="8" x="15" y="5" rx="1"/><path d="M17 13v3"/><path d="M3 3v16a2 2 0 0 0 2 2h16"/>',
+  lineChart: '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>',
+  briefcase: '<path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/>',
+  list: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  settings: '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  minus: '<path d="M5 12h14"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  rotate: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+  key: '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>',
+  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  arrowRight: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  maximize: '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  minimize: '<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3"/>',
+  pause: '<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+  stepForward: '<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/>',
+  trophy: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
+  book: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+};
+function icon(name, size = 16) {
+  return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
+/* Sustituye los <span data-icon> del HTML estático por SVG */
+function hydrateIcons(root = document) {
+  $$('[data-icon]', root).forEach(el => {
+    const wrap = document.createElement('span');
+    wrap.innerHTML = icon(el.dataset.icon, +el.dataset.size || 16);
+    const svg = wrap.firstChild;
+    if (el.className) svg.classList.add(...el.className.split(' ').filter(Boolean));
+    if (el.getAttribute('style')) svg.setAttribute('style', el.getAttribute('style'));
+    el.replaceWith(svg);
+  });
+}
+
+/* ---------------------------------------------------------------------
+   3. ESTADO PERSISTENTE
+   --------------------------------------------------------------------- */
+function defaultState() {
+  return {
+    version: 1,
+    cash: START_CASH, startCash: START_CASH,
+    positions: {},            // { SYM: { qty, avg } }
+    orders: [],               // todas las órdenes (pendientes, ejecutadas, canceladas)
+    watchlist: ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL'],
+    names: {},                // nombres de empresa conocidos
+    lastPrices: {},           // último precio conocido (para valorar sin conexión)
+    sparks: {},               // series cortas para sparklines
+    equity: [{ t: Date.now(), v: START_CASH }], // evolución del valor de la cartera
+    dayStart: null,           // { date, value } para el P&L del día
+    lastMode: null,           // 'demo' | 'live' — si cambia, se limpian precios cacheados
+    currency: 'EUR',          // toda la cuenta se lleva en euros
+    challengeCfg: { enabled: false, len: 120, speed: 1 }, // modo reto (Ajustes)
+    challenge: null,          // reto en curso (cuenta separada)
+    challengeHistory: [],     // resultados de retos terminados
+    selected: 'AAPL', range: '1M', chartType: 'candle',
+  };
+}
+function loadState() {
+  try {
+    const raw = localStorage.getItem(LS_STATE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Migración: las cuentas antiguas estaban en dólares. Se reinician en euros conservando la watchlist.
+      if (parsed.currency !== 'EUR') {
+        const s = defaultState();
+        ['watchlist', 'names', 'selected', 'range', 'chartType'].forEach(k => { if (parsed[k] != null) s[k] = parsed[k]; });
+        s._migrated = (parsed.orders || []).length > 0;
+        return s;
+      }
+      const s = Object.assign(defaultState(), parsed);
+      if (!Array.isArray(s.orders)) s.orders = [];
+      if (!Array.isArray(s.watchlist)) s.watchlist = [];
+      if (!Array.isArray(s.equity) || !s.equity.length) s.equity = [{ t: Date.now(), v: s.cash }];
+      if (!RANGES[s.range]) s.range = '1M';
+      return s;
+    }
+  } catch (e) { console.warn('Estado corrupto, se reinicia', e); }
+  return defaultState();
+}
+let state = loadState();
+function saveState() { try { localStorage.setItem(LS_STATE, JSON.stringify(state)); } catch (e) { console.warn('No se pudo guardar', e); } }
+const saveSoon = debounce(saveState, 800);
+
+function getApiKey() { try { return (localStorage.getItem(LS_KEY) || '').trim(); } catch { return ''; } }
+function setApiKey(k) { try { k ? localStorage.setItem(LS_KEY, k) : localStorage.removeItem(LS_KEY); } catch {} }
+const isDemo = () => !getApiKey();
+
+const nameOf = s => state.names[s] || DEMO_MAP[s]?.n || '';
+
+/* ---------------------------------------------------------------------
+   4. DATOS DE MERCADO
+   --------------------------------------------------------------------- */
+const live = {
+  quotes: {},        // { SYM: { c, pc, o, h, l } }
+  errors: {},        // errores por símbolo
+  ws: null, wsOpen: false, wsRetry: 0, wsTimer: null, subs: new Set(),
+  timers: [], polling: false, pollCycle: 0, lastPoll: null, lastTick: null,
+  pricesReady: false, lastError: null, candleAccess: true, inflight: new Set(),
+};
+const priceOf = s => live.quotes[s]?.c ?? state.lastPrices[s] ?? null;
+
+class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+
+/* Llamada REST a Finnhub con manejo de errores comunes */
+async function fh(path, params = {}, key = getApiKey()) {
+  const url = new URL(FINNHUB + path);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  url.searchParams.set('token', key);
+  let res;
+  try { res = await fetch(url); } catch { throw new ApiError('Sin conexión con Finnhub', 0); }
+  if (res.status === 401) throw new ApiError('API key no válida', 401);
+  if (res.status === 403) throw new ApiError('Tu plan de Finnhub no incluye este dato', 403);
+  if (res.status === 429) throw new ApiError('Límite de peticiones de Finnhub alcanzado (60/min)', 429);
+  if (!res.ok) throw new ApiError('Error de Finnhub (' + res.status + ')', res.status);
+  const j = await res.json();
+  if (j && j.error) throw new ApiError(j.error, 400);
+  return j;
+}
+
+/* ---- Conversión a euros ----
+   Finnhub devuelve cada valor en su divisa de cotización (AAPL en USD, SAN.MC en EUR…).
+   Todo se convierte a euros al recibirlo, con los tipos de referencia del BCE (api.frankfurter.dev, sin clave).
+   En modo demo los precios simulados ya se consideran euros. */
+const LS_FX = 'papertrade.fx';
+const FX_URL = 'https://api.frankfurter.dev/v1/latest?base=EUR';
+const fx = (() => { try { return JSON.parse(localStorage.getItem(LS_FX)) || {}; } catch { return {}; } })(); // { rates, date, fetchedAt }
+let fxPromise = null;
+function loadFX(force) {
+  if (!force && fx.rates && Date.now() - (fx.fetchedAt || 0) < 3600e3) return Promise.resolve();
+  if (fxPromise) return fxPromise;
+  fxPromise = fetch(FX_URL).then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(j => {
+      Object.assign(fx, { rates: j.rates, date: j.date, fetchedAt: Date.now() });
+      try { localStorage.setItem(LS_FX, JSON.stringify(fx)); } catch {}
+    })
+    .catch(() => { /* se sigue usando el último tipo guardado, si existe */ })
+    .finally(() => { fxPromise = null; scheduleRender(); });
+  return fxPromise;
+}
+/* Divisa de cotización según el sufijo del ticker de Finnhub (sin sufijo = EE. UU., USD) */
+const SUFFIX_CCY = {
+  MC: 'EUR', PA: 'EUR', DE: 'EUR', F: 'EUR', AS: 'EUR', MI: 'EUR', BR: 'EUR', LS: 'EUR', VI: 'EUR', HE: 'EUR', IR: 'EUR',
+  L: 'GBX', SW: 'CHF', TO: 'CAD', V: 'CAD', T: 'JPY', HK: 'HKD', AX: 'AUD', ST: 'SEK', CO: 'DKK', OL: 'NOK', MX: 'MXN', SA: 'BRL', WA: 'PLN',
+};
+function currencyOf(sym) { const m = /\.([A-Z]{1,2})$/.exec(sym); return (m && SUFFIX_CCY[m[1]]) || 'USD'; }
+/* Factor nativo → EUR, o null si falta el tipo de cambio. GBX = peniques (Londres) */
+function fxFactor(sym) {
+  const c = currencyOf(sym);
+  if (c === 'EUR') return 1;
+  if (c === 'GBX') return fx.rates?.GBP ? 1 / (100 * fx.rates.GBP) : null;
+  return fx.rates?.[c] ? 1 / fx.rates[c] : null;
+}
+async function eurFactor(sym) {
+  if (fxFactor(sym) == null) await loadFX(true);
+  const f = fxFactor(sym);
+  if (f == null) throw new ApiError(`Sin tipo de cambio ${currencyOf(sym)}→EUR`, 'fx');
+  return f;
+}
+
+async function fetchQuote(sym) {
+  if (isDemo()) return demoQuote(sym);
+  const q = await fh('/quote', { symbol: sym });
+  if (!q || (!q.c && !q.pc)) throw new ApiError('Sin datos para ' + sym, 404);
+  const f = await eurFactor(sym), e = v => v > 0 ? round(v * f, 4) : v;
+  return { c: e(q.c), pc: e(q.pc), o: e(q.o), h: e(q.h), l: e(q.l) };
+}
+
+async function searchSymbols(q) {
+  q = q.trim();
+  const ql = q.toLowerCase();
+  const local = DEMO_UNIVERSE.filter(([s, n]) => s.toLowerCase().startsWith(ql) || n.toLowerCase().includes(ql))
+    .map(([symbol, name]) => ({ symbol, name, meta: '' }));
+  if (!q) return POPULAR.map(s => ({ symbol: s, name: nameOf(s), meta: '' }));
+  if (isDemo()) return local;
+  const r = await fh('/search', { q });
+  const out = (r.result || []).slice(0, 20).map(x => ({ symbol: x.symbol, name: x.description, meta: x.type || '' }));
+  out.forEach(x => { if (x.name && !state.names[x.symbol]) state.names[x.symbol] = x.name; });
+  return out;
+}
+
+/* Histórico: velas reales si el plan lo permite; si no, serie simulada anclada al último precio real */
+async function fetchBars(sym, key) {
+  const R = RANGES[key];
+  if (!isDemo() && live.candleAccess) {
+    try {
+      const to = nowSec(), from = to - R.secs - (key === '1D' ? 4 * 86400 : 0);
+      const d = await fh('/stock/candle', { symbol: sym, resolution: R.res, from, to });
+      if (d.s === 'ok' && d.t?.length) {
+        const f = await eurFactor(sym); // velas convertidas a euros
+        let bars = d.t.map((t, i) => ({ time: t, open: d.o[i] * f, high: d.h[i] * f, low: d.l[i] * f, close: d.c[i] * f }));
+        if (key === '1D') { // solo la última sesión
+          const day = b => new Date(b.time * 1000).toDateString();
+          const last = day(bars[bars.length - 1]);
+          bars = bars.filter(b => day(b) === last);
+        }
+        return { bars, simulated: false };
+      }
+    } catch (e) {
+      if (e.status === 403 || e.status === 401) live.candleAccess = false; // no reintentar cada vez
+    }
+  }
+  let last = priceOf(sym);
+  if (last == null) { const q = await fetchQuote(sym); onPrice(sym, q.c, q); last = q.c; }
+  return { bars: synthBars(sym, key, last), simulated: true };
+}
+
+/* Genera velas simuladas (deterministas por símbolo y rango) que terminan exactamente en `last` */
+function synthBars(sym, key, last) {
+  const R = RANGES[key], rnd = mulberry32(hashStr(sym + key)), g = () => gaussFrom(rnd);
+  const times = [];
+  let t = Math.floor(nowSec() / R.step) * R.step;
+  while (times.length < R.n) {
+    const wd = new Date(t * 1000).getUTCDay();
+    if (R.step < 86400 || (wd !== 0 && wd !== 6)) times.push(t);
+    t -= R.step;
+  }
+  times.reverse();
+  const closes = new Array(R.n); closes[R.n - 1] = last;
+  for (let i = R.n - 2; i >= 0; i--) closes[i] = closes[i + 1] / (1 + g() * R.vol);
+  return times.map((time, i) => {
+    const close = closes[i], open = i ? closes[i - 1] : close * (1 + g() * R.vol * 0.5);
+    const high = Math.max(open, close) * (1 + Math.abs(g()) * R.vol * 0.4);
+    const low  = Math.min(open, close) * (1 - Math.abs(g()) * R.vol * 0.4);
+    return { time, open, high, low, close };
+  });
+}
+
+/* ---- Modo demo: paseo aleatorio por símbolo ---- */
+const demo = { prices: {} };
+function demoInit(sym) {
+  if (demo.prices[sym]) return demo.prices[sym];
+  const rnd = mulberry32(hashStr(sym + 'demo'));
+  const pc = DEMO_MAP[sym]?.p ?? round(20 + (hashStr(sym) % 280), 2);
+  const c = pc * (1 + (rnd() - 0.47) * 0.04);
+  const o = pc * (1 + (rnd() - 0.5) * 0.01);
+  return (demo.prices[sym] = { pc, o, c, h: Math.max(o, c) * 1.004, l: Math.min(o, c) * 0.996 });
+}
+function demoQuote(sym) { const d = demoInit(sym); return { ...d, c: round(d.c, d.c < 1 ? 4 : 2) }; }
+function demoTick() {
+  for (const s of trackedSymbols()) {
+    const d = demoInit(s);
+    const shock = gaussFrom(Math.random) * 0.0012 + (d.pc - d.c) / d.pc * 0.002; // ligera reversión
+    d.c = Math.max(0.01, d.c * (1 + shock));
+    d.h = Math.max(d.h, d.c); d.l = Math.min(d.l, d.c);
+    onPrice(s, round(d.c, d.c < 1 ? 4 : 2), { pc: d.pc, o: d.o, h: d.h, l: d.l });
+  }
+  live.lastTick = Date.now();
+}
+
+/* ---- Símbolos que necesitan precio: watchlist + posiciones + órdenes pendientes + seleccionado ---- */
+function trackedSymbols() {
+  const s = new Set(state.watchlist);
+  Object.keys(state.positions).forEach(x => s.add(x));
+  state.orders.forEach(o => o.status === 'pending' && s.add(o.sym));
+  if (state.selected) s.add(state.selected);
+  return [...s];
+}
+
+/* Punto de entrada de todos los precios (REST, WebSocket o demo) */
+function onPrice(sym, price, extra) {
+  if (!(price > 0)) return;
+  const q = live.quotes[sym] || (live.quotes[sym] = {});
+  const prev = q.c;
+  if (extra) { ['pc', 'o', 'h', 'l'].forEach(k => { if (extra[k] > 0) q[k] = extra[k]; }); }
+  q.c = price;
+  live.errors[sym] = null;
+  state.lastPrices[sym] = price;
+  pushSpark(sym, price);
+  if (prev !== undefined && prev !== price) {
+    if (sym === state.selected) MainChart.tick(price);
+  }
+  checkPending(sym, price);
+  scheduleRender();
+  saveSoon();
+}
+
+/* Sparklines: se guarda un punto cada N segundos; entre medias se actualiza el último */
+const sparkLastPush = {};
+function seedSpark(sym, price) {
+  const q = live.quotes[sym] || {};
+  if (!isDemo()) return [q.pc, q.o, price].filter(v => v > 0);
+  // Demo: puente browniano desde el cierre anterior hasta el precio actual
+  const n = 32, rnd = mulberry32(hashStr(sym + 'spark')), start = q.pc || price;
+  const w = [0]; for (let i = 1; i < n; i++) w.push(w[i - 1] + gaussFrom(rnd));
+  return w.map((v, i) => start + (price - start) * i / (n - 1) + (v - w[n - 1] * i / (n - 1)) * start * 0.002);
+}
+function pushSpark(sym, price) {
+  let a = state.sparks[sym];
+  const now = Date.now();
+  if (!a || !a.length) { state.sparks[sym] = seedSpark(sym, price); sparkLastPush[sym] = now; return; }
+  const gap = isDemo() ? 4000 : 15000;
+  if (now - (sparkLastPush[sym] || 0) < gap) { a[a.length - 1] = price; return; }
+  a.push(price);
+  if (a.length > SPARK_MAX) a.splice(0, a.length - SPARK_MAX);
+  sparkLastPush[sym] = now;
+}
+
+/* ---- Finnhub REST: polling ---- */
+function handleApiError(e) {
+  if (e.status === 401) live.lastError = 'API key no válida';
+  else if (e.status === 429) live.lastError = 'Límite de peticiones alcanzado';
+  else if (e.status === 0) live.lastError = 'Sin conexión';
+  else if (e.status === 'fx') live.lastError = 'Sin tipo de cambio a euros';
+}
+async function pollQuotes(force) {
+  if (isDemo() || live.polling) return;
+  live.pollCycle++;
+  // Con WebSocket activo basta con refrescar cotizaciones completas cada 60 s (para el cierre anterior)
+  if (!force && live.wsOpen && live.pollCycle % 4 !== 0) return;
+  live.polling = true;
+  live.lastError = null;
+  const syms = trackedSymbols();
+  try {
+    for (let i = 0; i < syms.length; i += 6) {
+      await Promise.all(syms.slice(i, i + 6).map(async s => {
+        try { const q = await fetchQuote(s); onPrice(s, q.c, q); }
+        catch (e) { live.errors[s] = e.message; handleApiError(e); }
+      }));
+      if (live.lastError === 'API key no válida') break;
+    }
+    live.lastPoll = Date.now();
+    live.pricesReady = true;
+    ensureDayStart();
+    recordEquity(false);
+  } finally { live.polling = false; scheduleRender(); }
+}
+/* Pide cotización de los símbolos seguidos que aún no tienen precio */
+function ensureQuotes() {
+  for (const s of trackedSymbols()) {
+    if (live.quotes[s]?.c) continue;
+    if (isDemo()) { const q = demoQuote(s); onPrice(s, q.c, q); continue; }
+    if (live.inflight.has(s)) continue;
+    live.inflight.add(s);
+    fetchQuote(s).then(q => onPrice(s, q.c, q))
+      .catch(e => { live.errors[s] = e.message; handleApiError(e); scheduleRender(); })
+      .finally(() => live.inflight.delete(s));
+  }
+  syncSubs();
+}
+
+/* ---- Finnhub WebSocket: precio en tiempo real por operación ---- */
+function connectWS() {
+  closeWS();
+  const key = getApiKey();
+  if (!key || !('WebSocket' in window)) return;
+  let ws;
+  try { ws = new WebSocket('wss://ws.finnhub.io?token=' + encodeURIComponent(key)); } catch { return; }
+  live.ws = ws; live.subs = new Set();
+  ws.onopen = () => { live.wsOpen = true; live.wsRetry = 0; syncSubs(); scheduleRender(); };
+  ws.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type !== 'trade' || !Array.isArray(m.data)) return;
+    const lastBySym = {};
+    for (const t of m.data) lastBySym[t.s] = t.p;   // nos quedamos con la última operación de cada símbolo
+    for (const s in lastBySym) { const f = fxFactor(s); if (f != null) onPrice(s, round(lastBySym[s] * f, 4)); } // a euros
+    live.lastTick = Date.now();
+  };
+  ws.onclose = () => {
+    if (live.ws !== ws) return;            // cierre intencionado
+    live.wsOpen = false; scheduleRender();
+    const delay = Math.min(60000, 2000 * 2 ** live.wsRetry++);
+    live.wsTimer = setTimeout(connectWS, delay); // reconexión con backoff; mientras, polling 15 s
+  };
+}
+function closeWS() {
+  clearTimeout(live.wsTimer);
+  if (live.ws) { const w = live.ws; live.ws = null; try { w.close(); } catch {} }
+  live.wsOpen = false; live.subs = new Set();
+}
+function syncSubs() {
+  if (!live.wsOpen || !live.ws) return;
+  const want = new Set(trackedSymbols());
+  for (const s of want) if (!live.subs.has(s)) { live.ws.send(JSON.stringify({ type: 'subscribe', symbol: s })); live.subs.add(s); }
+  for (const s of [...live.subs]) if (!want.has(s)) { live.ws.send(JSON.stringify({ type: 'unsubscribe', symbol: s })); live.subs.delete(s); }
+}
+
+/* ---- Arranque / parada del motor de datos ---- */
+function stopEngine() { live.timers.forEach(clearInterval); live.timers = []; closeWS(); }
+function startEngine() {
+  stopEngine();
+  const mode = isDemo() ? 'demo' : 'live';
+  if (state.lastMode && state.lastMode !== mode) { state.lastPrices = {}; state.sparks = {}; } // no mezclar precios simulados y reales
+  state.lastMode = mode;
+  Object.assign(live, { quotes: {}, errors: {}, pricesReady: false, lastError: null, candleAccess: true, pollCycle: 0, lastPoll: null });
+  demo.prices = {};
+  if (mode === 'demo') {
+    ensureQuotes();
+    live.pricesReady = true;
+    ensureDayStart();
+    live.timers.push(setInterval(demoTick, DEMO_MS));
+    MainChart.load();
+  } else {
+    // Primero el tipo de cambio (los precios se convierten a euros), luego datos
+    const tok = (live.engineToken = (live.engineToken || 0) + 1);
+    loadFX().then(() => {
+      if (tok !== live.engineToken) return; // el motor se reinició mientras tanto
+      connectWS(); pollQuotes(true); MainChart.load();
+    });
+    live.timers.push(setInterval(() => pollQuotes(false), POLL_MS));
+    live.timers.push(setInterval(() => loadFX(), 3600e3)); // el BCE publica una vez al día
+  }
+  live.timers.push(setInterval(() => { ensureDayStart(); recordEquity(false); }, 30000));
+  scheduleRender();
+}
+
+/* ---------------------------------------------------------------------
+   5. MOTOR DE ÓRDENES Y CARTERA
+   --------------------------------------------------------------------- */
+const pendingOrders = () => state.orders.filter(o => o.status === 'pending');
+/* Efectivo reservado por órdenes de compra pendientes (a su precio de activación) */
+const reservedCash = (exceptId) => pendingOrders().filter(o => o.side === 'buy' && o.id !== exceptId)
+  .reduce((s, o) => s + o.qty * o.trigger * (1 + FEE_RATE), 0);
+const reservedQty = (sym, exceptId) => pendingOrders().filter(o => o.side === 'sell' && o.sym === sym && o.id !== exceptId)
+  .reduce((s, o) => s + o.qty, 0);
+const availableCash = () => state.cash - reservedCash();
+const availableQty = sym => (state.positions[sym]?.qty || 0) - reservedQty(sym);
+
+/* Devuelve un mensaje de error o null si la orden es válida */
+function validateOrder(o, price) {
+  if (!o.sym) return 'Selecciona un valor';
+  if (!(o.qty > 0) || !Number.isInteger(o.qty)) return 'Introduce una cantidad entera mayor que 0';
+  if (price == null) return 'Sin precio disponible para ' + o.sym;
+  if (o.type !== 'market' && !(o.trigger > 0)) return 'Introduce un precio de activación válido';
+  const ref = o.type === 'market' ? price : o.trigger;
+  if (o.side === 'buy') {
+    const need = o.qty * ref * (1 + FEE_RATE), have = availableCash();
+    if (need > have + 1e-9) return `Saldo insuficiente: necesitas ${fmtMoney(need)} y tienes ${fmtMoney(have)} disponibles`;
+  } else {
+    const av = availableQty(o.sym);
+    if (av <= 0) return `No tienes acciones disponibles de ${o.sym}`;
+    if (o.qty > av) return `Solo tienes ${fmtQty(av)} acciones disponibles de ${o.sym}`;
+  }
+  return null;
+}
+
+function placeOrder({ sym, side, type, qty, trigger }) {
+  const price = priceOf(sym);
+  const o = { id: uid(), sym, side, type, qty, trigger: type === 'market' ? null : round(trigger, 4), status: 'pending', createdAt: Date.now() };
+  const err = validateOrder(o, price);
+  if (err) return { error: err };
+  state.orders.unshift(o);
+  if (type === 'market') fill(o, price);
+  else {
+    checkPending(sym, price); // puede ejecutarse al instante si ya se cumple la condición
+    if (o.status === 'pending') toast('Orden pendiente creada', `${sideLabel(o.side)} ${fmtQty(qty)} ${sym} · ${typeLabel(o)} a ${fmtPrice(o.trigger)}`);
+  }
+  saveState(); ensureQuotes(); scheduleRender();
+  return { order: o };
+}
+
+/* Ejecuta una orden al precio dado, revalidando saldo y posición */
+function fill(o, price) {
+  const gross = o.qty * price, fee = gross * FEE_RATE;
+  if (o.side === 'buy') {
+    if (gross + fee > state.cash - reservedCash(o.id) + 1e-9) return cancelOrder(o, 'Saldo insuficiente al ejecutar');
+    state.cash -= gross + fee;
+    const p = state.positions[o.sym] || { qty: 0, avg: 0 };
+    p.avg = (p.avg * p.qty + gross) / (p.qty + o.qty);
+    p.qty += o.qty;
+    state.positions[o.sym] = p;
+    o.amount = -(gross + fee);
+  } else {
+    const p = state.positions[o.sym];
+    if (!p || p.qty - reservedQty(o.sym, o.id) < o.qty) return cancelOrder(o, 'Posición insuficiente al ejecutar');
+    state.cash += gross - fee;
+    o.realized = (price - p.avg) * o.qty - fee;
+    p.qty -= o.qty;
+    if (p.qty <= 0) delete state.positions[o.sym];
+    o.amount = gross - fee;
+  }
+  Object.assign(o, { status: 'filled', fillPrice: price, fee, filledAt: Date.now() });
+  recordEquity(true);
+  saveState();
+  toast(`${o.side === 'buy' ? 'Compra' : 'Venta'} ejecutada`, `${fmtQty(o.qty)} ${o.sym} a ${fmtPrice(price)} · comisión ${fmtMoney(fee)}`);
+  syncSubs();
+}
+
+function cancelOrder(o, reason) {
+  o.status = 'cancelled'; o.cancelledAt = Date.now(); o.note = reason || 'Cancelada por el usuario';
+  saveState(); scheduleRender(); syncSubs();
+  toast('Orden cancelada', `${sideLabel(o.side)} ${fmtQty(o.qty)} ${o.sym} · ${o.note}`, reason ? 'error' : '');
+}
+
+/* Comprueba si el precio alcanza alguna orden límite/stop pendiente */
+function checkPending(sym, price) {
+  for (const o of state.orders) {
+    if (o.status !== 'pending' || o.sym !== sym) continue;
+    const hit = o.type === 'limit'
+      ? (o.side === 'buy' ? price <= o.trigger : price >= o.trigger)   // límite: compra barato / vende caro
+      : (o.side === 'sell' ? price <= o.trigger : price >= o.trigger); // stop: vende si cae / compra si rompe
+    if (hit) fill(o, price);
+  }
+}
+
+const sideLabel = s => s === 'buy' ? 'Compra' : 'Venta';
+const typeLabel = o => o.type === 'market' ? 'Mercado' : o.type === 'limit' ? 'Límite' : (o.side === 'sell' ? 'Stop-loss' : 'Stop');
+
+/* Valoración */
+const positionsValue = () => Object.entries(state.positions).reduce((s, [sym, p]) => s + p.qty * (priceOf(sym) ?? p.avg), 0);
+const equity = () => state.cash + positionsValue();
+
+function ensureDayStart(force) {
+  if (!force && !live.pricesReady) return;
+  if (force || !state.dayStart || state.dayStart.date !== todayKey()) {
+    state.dayStart = { date: todayKey(), value: equity() };
+    saveSoon();
+  }
+}
+/* Guarda un punto de la curva de valor como mucho cada minuto (o siempre tras una operación) */
+function recordEquity(force) {
+  const now = Date.now(), last = state.equity[state.equity.length - 1], v = round(equity(), 2);
+  if (!force && last && now - last.t < 60000) return;
+  if (last && Math.floor(last.t / 1000) === Math.floor(now / 1000)) last.v = v; else state.equity.push({ t: now, v });
+  if (state.equity.length > 5000) state.equity.splice(0, state.equity.length - 5000);
+  saveSoon();
+  EquityChart.refresh();
+}
+
+async function resetAccount() {
+  const ok = await confirmDialog({
+    title: '¿Reiniciar la cuenta?',
+    text: 'Se borrarán todas las posiciones, órdenes (incluidas las pendientes), el historial y la evolución de la cartera. El saldo volverá a 10.000,00 €. Esta acción no se puede deshacer.',
+    okLabel: 'Sí, reiniciar cuenta',
+  });
+  if (!ok) return;
+  const keep = { watchlist: state.watchlist, names: state.names, lastPrices: state.lastPrices, sparks: state.sparks,
+                 selected: state.selected, range: state.range, chartType: state.chartType, lastMode: state.lastMode,
+                 challengeCfg: state.challengeCfg, challenge: state.challenge, challengeHistory: state.challengeHistory }; // el reto es independiente
+  state = Object.assign(defaultState(), keep);
+  ensureDayStart(true);
+  saveState();
+  EquityChart.refresh();
+  syncSubs();
+  scheduleRender();
+  toast('Cuenta reiniciada', 'Saldo restablecido a 10.000,00 €');
+}
+
+/* ---------------------------------------------------------------------
+   6. GRÁFICOS — monocromo: línea #0a0a0a, rejilla #e5e5e5, velas rojas/negras
+   --------------------------------------------------------------------- */
+let C = {};
+function readColors() {
+  const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
+  C = { fg: v('--fg'), muted: v('--muted'), border: v('--border'), card: v('--card'), red: v('--red'), green: v('--green'), p2: v('--primary-2') };
+}
+const hasCharts = () => typeof window.LightweightCharts !== 'undefined';
+
+/* ---- Tema claro / oscuro ---- */
+const LS_THEME = 'papertrade.theme';
+const darkMQ = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+function getTheme() { try { return localStorage.getItem(LS_THEME) || 'system'; } catch { return 'system'; } }
+function effectiveTheme() { const t = getTheme(); return t === 'system' ? (darkMQ?.matches ? 'dark' : 'light') : t; }
+function setTheme(t) {
+  try { localStorage.setItem(LS_THEME, t); } catch {}
+  if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  onThemeChange();
+}
+/* Los gráficos no leen CSS: hay que repintarlos con los nuevos colores */
+function onThemeChange() {
+  readColors();
+  MainChart.restyle();
+  EquityChart.restyle();
+  Challenge.restyle();
+  const dark = effectiveTheme() === 'dark', tb = $('#themeToggle');
+  tb.innerHTML = icon(dark ? 'sun' : 'moon', 18);
+  tb.title = dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'; tb.setAttribute('aria-label', tb.title);
+  $$('#themeSeg button').forEach(b => b.classList.toggle('active', b.dataset.themeOpt === getTheme()));
+  scheduleRender();
+}
+function chartOptions(extra = {}) {
+  const line = { color: C.muted, width: 1, style: 3, labelBackgroundColor: C.p2 };
+  return Object.assign({
+    autoSize: true,
+    layout: { background: { type: 'solid', color: C.card }, textColor: C.muted, fontFamily: 'Geist, Inter, system-ui, sans-serif', fontSize: 12 },
+    grid: { vertLines: { color: C.border }, horzLines: { color: C.border } },
+    rightPriceScale: { borderColor: C.border },
+    timeScale: { borderColor: C.border, timeVisible: true, secondsVisible: false, rightOffset: 3 },
+    crosshair: { vertLine: line, horzLine: line },
+    localization: { locale: 'es-ES', priceFormatter: p => fmtNum(p) },
+  }, extra);
+}
+
+const MainChart = {
+  chart: null, candle: null, line: null, bars: [], byTime: new Map(), token: 0,
+  init() {
+    if (!hasCharts()) { this.overlay('No se pudo cargar la librería de gráficos.'); return; }
+    this.chart = LightweightCharts.createChart($('#chart'), chartOptions());
+    this.candle = this.chart.addCandlestickSeries({
+      upColor: C.green, downColor: C.red, borderUpColor: C.green, borderDownColor: C.red,
+      wickUpColor: C.green, wickDownColor: C.red, priceLineColor: C.muted,
+    });
+    this.line = this.chart.addLineSeries({ color: C.fg, lineWidth: 2, priceLineColor: C.muted, crosshairMarkerBorderColor: C.card, crosshairMarkerBackgroundColor: C.fg });
+    this.applyType();
+    this.chart.subscribeCrosshairMove(p => this.legend(p && p.time ? this.byTime.get(p.time) : null));
+  },
+  restyle() {
+    if (!this.chart) return;
+    this.chart.applyOptions(chartOptions());
+    this.candle.applyOptions({ upColor: C.green, downColor: C.red, borderUpColor: C.green, borderDownColor: C.red, wickUpColor: C.green, wickDownColor: C.red, priceLineColor: C.muted });
+    this.line.applyOptions({ color: C.fg, priceLineColor: C.muted, crosshairMarkerBorderColor: C.card, crosshairMarkerBackgroundColor: C.fg });
+  },
+  applyType() {
+    if (!this.chart) return;
+    const c = state.chartType === 'candle';
+    this.candle.applyOptions({ visible: c });
+    this.line.applyOptions({ visible: !c });
+  },
+  overlay(msg) { const o = $('#chartOverlay'); o.hidden = !msg; o.textContent = msg || ''; },
+  legend(bar) {
+    bar = bar || this.bars[this.bars.length - 1];
+    $('#ohlc').innerHTML = bar ? `A <b>${fmtNum(bar.open)}</b> · Máx <b>${fmtNum(bar.high)}</b> · Mín <b>${fmtNum(bar.low)}</b> · C <b>${fmtNum(bar.close)}</b>` : '';
+  },
+  setBars(bars) {
+    this.bars = bars; this.byTime = new Map(bars.map(b => [b.time, b]));
+    this.candle.setData(bars);
+    this.line.setData(bars.map(b => ({ time: b.time, value: b.close })));
+    this.chart.timeScale().fitContent();
+    this.legend();
+  },
+  async load() {
+    if (!this.chart) return;
+    const sym = state.selected, key = state.range, token = ++this.token;
+    this.overlay('Cargando ' + sym + '…');
+    $('#chartNote').innerHTML = '';
+    try {
+      const r = await fetchBars(sym, key);
+      if (token !== this.token) return; // llegó otra petición más reciente
+      this.setBars(r.bars.map(b => ({ ...b, time: tzShift(b.time) })));
+      this.overlay(null);
+      $('#chartNote').innerHTML = r.simulated
+        ? `<span class="badge badge-muted">Histórico simulado</span> ${isDemo() ? 'Modo demo' : 'Tu plan de Finnhub no incluye velas: serie ilustrativa anclada al precio real'}`
+        : `<span class="badge badge-outline">Finnhub</span> Velas reales`;
+    } catch (e) {
+      if (token !== this.token) return;
+      this.setBars([]);
+      this.overlay(`No hay datos de ${sym}. ${e.message || ''}`);
+    }
+  },
+  /* Actualiza la última vela (o abre una nueva) con cada precio en tiempo real */
+  tick(price) {
+    if (!this.chart || !this.bars.length) return;
+    const step = RANGES[state.range].step, now = tzShift(nowSec()), last = this.bars[this.bars.length - 1];
+    let bar;
+    if (now < last.time + step) {
+      last.close = price; last.high = Math.max(last.high, price); last.low = Math.min(last.low, price); bar = last;
+    } else {
+      const t = last.time + step * Math.floor((now - last.time) / step);
+      bar = { time: t, open: last.close, high: Math.max(last.close, price), low: Math.min(last.close, price), close: price };
+      this.bars.push(bar); this.byTime.set(t, bar);
+    }
+    this.candle.update(bar);
+    this.line.update({ time: bar.time, value: bar.close });
+  },
+};
+
+const EquityChart = {
+  chart: null, series: null, baseLine: null, lastTime: null,
+  init() {
+    if (!hasCharts()) return;
+    this.chart = LightweightCharts.createChart($('#equityChart'), chartOptions());
+    this.series = this.chart.addLineSeries({ color: C.fg, lineWidth: 2, priceLineVisible: false, crosshairMarkerBorderColor: C.card, crosshairMarkerBackgroundColor: C.fg });
+    this.refresh();
+  },
+  restyle() {
+    if (!this.chart) return;
+    this.chart.applyOptions(chartOptions());
+    this.series.applyOptions({ color: C.fg, crosshairMarkerBorderColor: C.card, crosshairMarkerBackgroundColor: C.fg });
+    this.refresh(); // recrea la línea del capital inicial con el color nuevo
+  },
+  refresh() {
+    if (!this.series) return;
+    const m = new Map();
+    for (const p of state.equity) m.set(tzShift(Math.floor(p.t / 1000)), p.v);
+    const data = [...m].sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time, value }));
+    this.series.setData(data);
+    this.lastTime = data.length ? data[data.length - 1].time : null;
+    if (this.baseLine) this.series.removePriceLine(this.baseLine);
+    this.baseLine = this.series.createPriceLine({ price: state.startCash, color: C.muted, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Inicial' });
+    this.chart.timeScale().fitContent();
+  },
+  /* Punto "ahora" no persistido, para que la curva se mueva en tiempo real */
+  live(v) {
+    if (!this.series) return;
+    const t = tzShift(nowSec());
+    if (this.lastTime != null && t < this.lastTime) return;
+    this.series.update({ time: t, value: v });
+    this.lastTime = t;
+  },
+};
+
+/* ---------------------------------------------------------------------
+   7. RENDERIZADO
+   --------------------------------------------------------------------- */
+const ui = { view: 'market', side: 'buy', otype: 'market', ordersFilter: 'all', touchedTrigger: false };
+const VIEWS = { market: ['mercado', 'Mercado'], portfolio: ['cartera', 'Cartera'], orders: ['ordenes', 'Órdenes'], challenge: ['reto', 'Reto'], guide: ['guia', 'Guía'], settings: ['ajustes', 'Ajustes'] };
+
+/* Render agrupado: como mucho cada 250 ms aunque lleguen muchos ticks */
+let renderQueued = false, lastRender = 0;
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  const wait = Math.max(0, 250 - (performance.now() - lastRender));
+  setTimeout(() => requestAnimationFrame(() => { renderQueued = false; lastRender = performance.now(); renderAll(); }), wait);
+}
+function renderAll() {
+  renderStatus();
+  $('#demoBanner').hidden = !isDemo();
+  const pc = pendingOrders().length;
+  $('#pendingCount').hidden = !pc; $('#pendingCount').textContent = pc;
+  if (ui.view === 'market') { renderMarketHeader(); renderWatchlist(); updateOrderSummary(); }
+  if (ui.view === 'portfolio') renderPortfolio();
+  if (ui.view === 'orders') renderOrders();
+  if (ui.view === 'settings') renderConnInfo();
+  if (ui.view === 'challenge') Challenge.render();
+  if (fsState.on && ui.view === 'market') renderFsBar();
+  if (ui.view === 'guide' && !$('#cEntry').value && priceOf(state.selected) != null) prefillCalc(); // precio llegó tarde
+}
+
+/* Parchea filas de una tabla por clave para no recrear el DOM en cada tick (evita perder clics) */
+function patchRows(tbody, rows) {
+  const cur = [...tbody.rows];
+  const same = cur.length === rows.length && cur.every((tr, i) => tr.dataset.key === rows[i].key);
+  if (!same) {
+    tbody.innerHTML = rows.map(r => `<tr data-key="${esc(r.key)}" class="${r.cls || ''}">${r.cells.map(c => `<td class="${c.cls || ''}">${c.html}</td>`).join('')}</tr>`).join('');
+    [...tbody.rows].forEach((tr, i) => [...tr.cells].forEach((td, j) => { td._h = rows[i].cells[j].html; }));
+    return;
+  }
+  rows.forEach((r, i) => {
+    const tr = cur[i];
+    if (tr.className !== (r.cls || '')) tr.className = r.cls || '';
+    r.cells.forEach((c, j) => { const td = tr.cells[j]; if (td._h !== c.html) { td.innerHTML = c.html; td._h = c.html; } });
+  });
+}
+
+function renderStatus() {
+  let dot = '', title, sub;
+  if (isDemo()) { title = 'Modo demo'; sub = 'Datos simulados'; }
+  else if (live.lastError) { dot = 'err'; title = 'Error de datos'; sub = live.lastError; }
+  else if (live.wsOpen) { dot = 'live'; title = 'En vivo'; sub = 'WebSocket conectado'; }
+  else { dot = 'live'; title = 'En vivo'; sub = 'Polling cada 15 s'; }
+  const html = `<span class="dot ${dot}"></span><div><div class="status-title">${title}</div><div class="status-sub">${esc(sub)}</div></div>`;
+  const box = $('#statusBox'); if (box._h !== html) { box.innerHTML = html; box._h = html; }
+}
+
+function renderMarketHeader() {
+  const s = state.selected, q = live.quotes[s], p = priceOf(s);
+  $('#symTitle').textContent = s;
+  $('#symName').innerHTML = nameOf(s) ? esc(nameOf(s)) : (live.errors[s] ? `<span class="neg">${esc(live.errors[s])}</span>` : '&nbsp;');
+  $('#symPrice').textContent = fmtPrice(p);
+  $('#symChange').innerHTML = (q && q.pc && p) ? deltaBoth(p - q.pc, (p - q.pc) / q.pc * 100) + ' <span class="muted">hoy</span>' : '';
+  // Precio en la divisa original, para que la conversión sea transparente
+  const ccy = currencyOf(s), f = fxFactor(s);
+  let nat = '';
+  if (!isDemo() && ccy !== 'EUR' && f && p != null) {
+    const native = p / f, unit = ccy === 'GBX' ? 'GBp' : ccy;
+    nat = `Cotiza en ${unit}: ${fmtNum(native)} ${unit} · convertido al tipo del BCE${fx.date ? ' del ' + new Date(fx.date).toLocaleDateString('es-ES') : ''}`;
+  }
+  $('#symNative').textContent = nat;
+  const badge = $('#symBadge'); badge.hidden = !isDemo(); badge.textContent = 'Simulado';
+  const inW = state.watchlist.includes(s), wt = $('#watchToggle');
+  wt.classList.toggle('active', inW);
+  wt.setAttribute('aria-label', inW ? 'Quitar de la lista de seguimiento' : 'Añadir a la lista de seguimiento');
+  wt.title = wt.getAttribute('aria-label');
+  $('#crumbSym').textContent = s;
+  $('#orderSym').textContent = s;
+}
+
+function sparkSVG(arr, neg) {
+  if (!arr || arr.length < 2) return '<span class="flat">—</span>';
+  const w = 88, h = 28, pad = 2, min = Math.min(...arr), max = Math.max(...arr), span = max - min || 1;
+  const pts = arr.map((v, i) => `${(pad + i * (w - 2 * pad) / (arr.length - 1)).toFixed(1)},${(h - pad - (v - min) / span * (h - 2 * pad)).toFixed(1)}`).join(' ');
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="${neg ? C.red : C.fg}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+function renderWatchlist() {
+  const list = state.watchlist;
+  $('#watchCount').textContent = list.length === 1 ? '1 valor' : `${list.length} valores`;
+  $('#watchEmpty').hidden = list.length > 0;
+  patchRows($('#watchBody'), list.map(s => {
+    const q = live.quotes[s], p = priceOf(s), pct = q?.pc && p ? (p - q.pc) / q.pc * 100 : null, err = live.errors[s];
+    return {
+      key: s, cls: 'clickable' + (s === state.selected ? ' selected' : ''),
+      cells: [
+        { html: `<div class="tick">${esc(s)}</div><div class="sub ellipsis">${esc(nameOf(s)) || '&nbsp;'}</div>` },
+        { cls: 'hide-sm', html: sparkSVG(state.sparks[s], pct != null && pct < 0) },
+        { cls: 'r num', html: (p == null && err) ? `<span class="neg" title="${esc(err)}">Sin datos</span>` : fmtPrice(p) },
+        { cls: 'r', html: deltaPct(pct) },
+        { cls: 'r', html: `<button class="icon-btn" data-remove="${esc(s)}" aria-label="Quitar ${esc(s)} de la lista" title="Quitar">${icon('x')}</button>` },
+      ],
+    };
+  }));
+}
+
+/* Panel de orden: solo actualiza textos (no recrea inputs) */
+function readOrderForm() {
+  return { sym: state.selected, side: ui.side, type: ui.otype, qty: Number($('#qtyInput').value), trigger: Number($('#triggerInput').value) };
+}
+function updateOrderSummary() {
+  // Si el precio llega después de elegir el valor, rellenamos el precio de activación vacío
+  if (ui.otype !== 'market' && !$('#triggerInput').value) prefillTrigger(true);
+  const f = readOrderForm(), price = priceOf(f.sym);
+  const ref = f.type === 'market' ? price : (f.trigger > 0 ? f.trigger : null);
+  const qty = f.qty > 0 ? f.qty : 0;
+  const sub = ref != null ? qty * ref : null, fee = sub != null ? sub * FEE_RATE : null;
+  const total = sub != null ? (f.side === 'buy' ? sub + fee : sub - fee) : null;
+  $('#sumMarket').textContent = fmtPrice(price);
+  $('#sumRefLabel').textContent = f.type === 'market' ? 'Precio estimado' : f.type === 'limit' ? 'Precio límite' : 'Precio stop';
+  $('#sumRef').textContent = fmtPrice(ref);
+  $('#sumSub').textContent = fmtMoney(sub);
+  $('#sumFee').textContent = fmtMoney(fee);
+  $('#sumTotalLabel').textContent = f.side === 'buy' ? 'Coste estimado' : 'Importe estimado';
+  $('#sumTotal').textContent = fmtMoney(total);
+  $('#availText').textContent = f.side === 'buy' ? fmtMoney(availableCash()) : `${fmtQty(availableQty(f.sym))} acc. de ${f.sym}`;
+
+  const pos = state.positions[f.sym], pi = $('#posInfo');
+  pi.hidden = !pos;
+  if (pos) {
+    const pl = (price ?? pos.avg) - pos.avg;
+    pi.innerHTML = `<span>Tu posición</span><span class="num">${fmtQty(pos.qty)} × ${fmtPrice(pos.avg)} · ${deltaMoney(pl * pos.qty)}</span>`;
+  }
+
+  // Texto de ayuda según tipo de orden
+  const tp = f.trigger > 0 ? fmtPrice(f.trigger) : 'X';
+  const hints = {
+    'limit-buy': `Se compra cuando el precio baje a ${tp} o menos.`,
+    'limit-sell': `Se vende cuando el precio suba a ${tp} o más.`,
+    'stop-sell': `Si el precio cae a ${tp} o menos, se vende a mercado para limitar pérdidas.`,
+    'stop-buy': `Si el precio sube a ${tp} o más, se compra a mercado.`,
+  };
+  $('#triggerHint').textContent = hints[`${f.type}-${f.side}`] || '';
+
+  const err = validateOrder({ ...f, trigger: f.type === 'market' ? null : f.trigger }, price);
+  $('#orderError').textContent = err || '';
+  const btn = $('#submitOrder');
+  btn.disabled = !!err;
+  btn.className = 'btn full ' + (f.side === 'buy' ? 'btn-primary' : 'btn-destructive');
+  btn.textContent = `${f.side === 'buy' ? 'Comprar' : 'Vender'}${qty ? ' ' + fmtQty(qty) : ''} ${f.sym}${f.type !== 'market' ? ' · ' + typeLabel({ type: f.type, side: f.side }) : ''}`;
+}
+
+/* Sincroniza los controles segmentados del panel de orden con `ui` */
+function applyOrderUI() {
+  $$('#sideSeg button').forEach(b => b.classList.toggle('active', b.dataset.side === ui.side));
+  $$('#otypeSeg button').forEach(b => b.classList.toggle('active', b.dataset.otype === ui.otype));
+  $('#stopBtn').textContent = ui.side === 'sell' ? 'Stop-loss' : 'Stop';
+  $('#triggerField').hidden = ui.otype === 'market';
+  $('#triggerLabel').textContent = ui.otype === 'limit' ? 'Precio límite' : 'Precio de activación (stop)';
+  updateOrderSummary();
+}
+function prefillTrigger(force) {
+  const p = priceOf(state.selected);
+  if (p != null && (force || !ui.touchedTrigger || !$('#triggerInput').value)) $('#triggerInput').value = round(p, p < 1 ? 4 : 2);
+}
+
+function renderPortfolio() {
+  const eq = equity(), total = eq - state.startCash, totalPct = total / state.startCash * 100;
+  const ds = state.dayStart?.value ?? eq, day = eq - ds, dayPct = ds ? day / ds * 100 : 0;
+  const reserved = reservedCash(), invested = positionsValue();
+  const metric = (id, html, cls) => { const el = $(id); el.innerHTML = html; el.className = 'metric-value' + (cls ? ' ' + cls : ''); };
+  metric('#mCash', fmtMoney(state.cash));
+  $('#mCashSub').textContent = reserved > 0 ? `${fmtMoney(reserved)} reservado en órdenes` : `${nf2.format(state.cash / eq * 100)} % de la cartera`;
+  metric('#mEquity', fmtMoney(eq));
+  $('#mEquitySub').textContent = `Invertido ${fmtMoney(invested)} · Inicial ${fmtMoney(state.startCash)}`;
+  metric('#mDay', arrow(day) + fmtMoney(Math.abs(day)), day < -1e-9 ? 'neg' : '');
+  $('#mDaySub').innerHTML = deltaPct(dayPct) + ' desde el inicio de la sesión';
+  metric('#mTotal', arrow(total) + fmtMoney(Math.abs(total)), total < -1e-9 ? 'neg' : '');
+  $('#mTotalSub').innerHTML = deltaPct(totalPct) + ' desde el inicio';
+
+  const syms = Object.keys(state.positions).sort();
+  $('#posCount').textContent = syms.length ? `${syms.length} ${syms.length === 1 ? 'posición' : 'posiciones'} · valor ${fmtMoney(invested)}` : '';
+  $('#posEmpty').hidden = syms.length > 0;
+  patchRows($('#posBody'), syms.map(s => {
+    const p = state.positions[s], cur = priceOf(s) ?? p.avg, pl = (cur - p.avg) * p.qty, plPct = (cur - p.avg) / p.avg * 100;
+    return { key: s, cls: 'clickable', cells: [
+      { html: `<div class="tick">${esc(s)}</div><div class="sub ellipsis">${esc(nameOf(s)) || '&nbsp;'}</div>` },
+      { cls: 'r', html: fmtQty(p.qty) }, { cls: 'r', html: fmtPrice(p.avg) }, { cls: 'r', html: fmtPrice(cur) },
+      { cls: 'r', html: fmtMoney(cur * p.qty) }, { cls: 'r', html: deltaMoney(pl) }, { cls: 'r', html: deltaPct(plPct) },
+    ] };
+  }));
+
+  const hist = state.orders.filter(o => o.status === 'filled').sort((a, b) => b.filledAt - a.filledAt);
+  $('#histEmpty').hidden = hist.length > 0;
+  patchRows($('#histBody'), hist.map(o => ({ key: o.id, cells: [
+    { html: fmtDate(o.filledAt) }, { html: `<span class="tick">${esc(o.sym)}</span>` },
+    { html: o.side === 'buy' ? '<span class="badge badge-outline">Compra</span>' : '<span class="badge badge-red">Venta</span>' },
+    { html: typeLabel(o) }, { cls: 'r', html: fmtQty(o.qty) }, { cls: 'r', html: fmtPrice(o.fillPrice) },
+    { cls: 'r', html: fmtMoney(o.fee) }, { cls: 'r', html: fmtMoney(o.amount) },
+    { cls: 'r', html: o.side === 'sell' ? deltaMoney(o.realized) : '<span class="flat">—</span>' },
+  ] })));
+
+  EquityChart.live(eq);
+}
+
+const STATUS_BADGE = {
+  filled: '<span class="badge badge-solid">Ejecutada</span>',
+  pending: '<span class="badge badge-outline">Pendiente</span>',
+  cancelled: '<span class="badge badge-muted">Cancelada</span>',
+};
+function renderOrders() {
+  const f = ui.ordersFilter;
+  $$('#ordersFilter button').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+  $('#ordersTitle').textContent = { all: 'Todas las órdenes', pending: 'Órdenes pendientes', filled: 'Órdenes ejecutadas', cancelled: 'Órdenes canceladas' }[f];
+  const list = state.orders.filter(o => f === 'all' || o.status === f);
+  $('#ordersEmpty').hidden = list.length > 0;
+  patchRows($('#ordersBody'), list.map(o => {
+    const cur = priceOf(o.sym);
+    return { key: o.id + o.status, cells: [
+      { html: fmtDate(o.createdAt) },
+      { html: `<span class="tick">${esc(o.sym)}</span>` },
+      { html: o.side === 'buy' ? 'Compra' : '<span class="neg">Venta</span>' },
+      { html: typeLabel(o) },
+      { cls: 'r', html: fmtQty(o.qty) },
+      { cls: 'r', html: o.trigger ? fmtPrice(o.trigger) + (o.status === 'pending' && cur ? `<div class="sub">actual ${fmtPrice(cur)}</div>` : '') : '<span class="flat">—</span>' },
+      { cls: 'r', html: o.fillPrice ? fmtPrice(o.fillPrice) + `<div class="sub">${fmtDate(o.filledAt)}</div>` : '<span class="flat">—</span>' },
+      { html: STATUS_BADGE[o.status] + (o.status === 'cancelled' && o.note ? `<div class="sub">${esc(o.note)}</div>` : '') },
+      { cls: 'r', html: o.status === 'pending' ? `<button class="btn btn-outline sm" data-cancel="${esc(o.id)}">Cancelar</button>` : '' },
+    ] };
+  }));
+}
+
+function renderConnInfo() {
+  const rows = [
+    ['Modo', isDemo() ? 'Demo (simulado)' : 'Datos reales (Finnhub)'],
+    ['Tiempo real', isDemo() ? '—' : live.wsOpen ? 'WebSocket conectado' : 'Polling cada 15 s'],
+    ['Última actualización', live.lastPoll || live.lastTick ? new Date(Math.max(live.lastPoll || 0, live.lastTick || 0)).toLocaleTimeString('es-ES') : '—'],
+    ['Histórico de velas', isDemo() ? 'Simulado' : live.candleAccess ? 'Velas reales' : 'Simulado (plan sin acceso)'],
+    ['Valores seguidos', String(trackedSymbols().length)],
+    ['Divisa de la cuenta', 'Euro (€)'],
+    ['Tipo de cambio', fx.rates?.USD ? `1 € = ${nf4.format(fx.rates.USD)} $ (BCE, ${new Date(fx.date).toLocaleDateString('es-ES')})` : (isDemo() ? 'No necesario en demo' : 'Cargando…')],
+    ['Estado', live.lastError ? `<span class="neg">${esc(live.lastError)}</span>` : 'Correcto'],
+  ];
+  const html = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const el = $('#connInfo'); if (el._h !== html) { el.innerHTML = html; el._h = html; }
+}
+
+/* Navegación entre vistas (hash: #mercado, #cartera, #ordenes, #ajustes) */
+function viewFromHash() {
+  const h = location.hash.replace('#', '');
+  return Object.keys(VIEWS).find(k => VIEWS[k][0] === h) || 'market';
+}
+function showView(v) {
+  if (v === 'challenge' && !state.challengeCfg.enabled) { goView('market'); return; }
+  if (fsState.on) toggleFullscreen(false);
+  if (v !== 'challenge') Challenge.stopAuto();
+  ui.view = v;
+  $$('.view').forEach(s => { s.hidden = s.dataset.view !== v; });
+  $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === v));
+  $('#crumbView').textContent = VIEWS[v][1];
+  $('#crumbSymWrap').hidden = v !== 'market';
+  if (v === 'portfolio') EquityChart.refresh();
+  if (v === 'settings') { $('#apiKeyInput').value = getApiKey(); $('#keyStatus').textContent = ''; }
+  if (v === 'guide') prefillCalc();
+  if (v === 'challenge') Challenge.enter();
+  document.title = `${VIEWS[v][1]} · Papertrade`;
+  renderAll();
+  window.scrollTo(0, 0);
+}
+function goView(v) { const h = '#' + VIEWS[v][0]; if (location.hash !== h) location.hash = h; else showView(v); }
+
+/* Seleccionar un valor: lo muestra en el gráfico y en el panel de orden */
+function selectSymbol(sym, { go = true } = {}) {
+  sym = String(sym).trim().toUpperCase();
+  if (!sym) return;
+  const changed = sym !== state.selected;
+  state.selected = sym;
+  saveSoon();
+  ensureQuotes();
+  if (changed) { ui.touchedTrigger = false; $('#triggerInput').value = ''; MainChart.load(); prefillTrigger(true); }
+  if (go) goView('market');
+  scheduleRender();
+}
+function toggleWatch(sym) {
+  const i = state.watchlist.indexOf(sym);
+  if (i >= 0) state.watchlist.splice(i, 1); else state.watchlist.push(sym);
+  saveState(); ensureQuotes(); scheduleRender();
+  return i < 0;
+}
+
+/* ---- Guía: calculadora de tamaño de posición ----
+   acciones = (capital × riesgo%) / (entrada − stop), limitado por el efectivo disponible */
+const calc = { lastSym: null, shares: 0 };
+function prefillCalc() {
+  const sym = state.selected, p = priceOf(sym);
+  $('#cCapital').value = Math.floor(equity());
+  if (calc.lastSym !== sym && p != null) { // al cambiar de valor: entrada = precio actual, stop un 5 % por debajo
+    $('#cEntry').value = round(p, p < 1 ? 4 : 2);
+    $('#cStop').value = round(p * 0.95, p < 1 ? 4 : 2);
+    calc.lastSym = sym;
+  }
+  $('#cHint').textContent = `Valor seleccionado: ${sym}. El stop sugerido está un 5 % por debajo del precio actual.`;
+  updateCalc();
+}
+function updateCalc() {
+  const cap = +$('#cCapital').value, pct = +$('#cRisk').value, entry = +$('#cEntry').value, stop = +$('#cStop').value;
+  let err = '';
+  if (!(cap > 0)) err = 'Introduce el capital.';
+  else if (!(pct > 0 && pct <= 100)) err = 'El riesgo debe estar entre 0,1 % y 100 %.';
+  else if (!(entry > 0) || !(stop > 0)) err = 'Introduce el precio de entrada y el del stop.';
+  else if (stop >= entry) err = 'Para una compra, el stop debe estar por debajo de la entrada.';
+  const riskAmt = cap * pct / 100, perShare = entry - stop;
+  let shares = err ? 0 : Math.floor(riskAmt / perShare);
+  const maxByCash = entry > 0 ? Math.floor(availableCash() / (entry * (1 + FEE_RATE))) : 0;
+  let note = '';
+  if (!err && shares > maxByCash) { shares = maxByCash; note = ` (limitado por tu efectivo disponible)`; }
+  if (!err && shares < 1) err = 'Con este riesgo no llega ni a 1 acción: aleja el stop o aumenta el %.';
+  calc.shares = err ? 0 : shares;
+  $('#cRiskAmt').textContent = err && !(cap > 0) ? '—' : fmtMoney(riskAmt);
+  $('#cPerShare').textContent = perShare > 0 ? fmtPrice(perShare) : '—';
+  $('#cCost').textContent = calc.shares ? fmtMoney(calc.shares * entry) : '—';
+  $('#cTarget').textContent = perShare > 0 && !err ? fmtPrice(entry + 2 * perShare) : '—';
+  $('#cShares').textContent = calc.shares ? fmtQty(calc.shares) + note : '—';
+  $('#cError').textContent = err;
+  $('#cApply').disabled = !calc.shares;
+}
+function applyCalc() {
+  if (!calc.shares) return;
+  ui.side = 'buy'; ui.otype = 'market';
+  $('#qtyInput').value = calc.shares;
+  applyOrderUI();
+  goView('market');
+  toast('Cantidad aplicada', `${fmtQty(calc.shares)} ${state.selected}. Después crea un Stop-loss de venta a ${fmtPrice(+$('#cStop').value)}`);
+}
+
+/* ---- Pantalla completa del gráfico (tecla F o botón) ----
+   Se combina la API Fullscreen del navegador con una tarjeta fija a toda la ventana,
+   para que las notificaciones y la paleta ⌘K sigan viéndose encima. */
+const fsState = { on: false, card: null };
+function toggleFullscreen(force) {
+  const on = force ?? !fsState.on;
+  if (on === fsState.on) return;
+  if (on) {
+    const card = ui.view === 'market' ? $('#chartCard') : ui.view === 'challenge' ? $('#chCard') : null;
+    if (!card) return;
+    fsState.card = card;
+    card.classList.add('fs-active');
+    document.body.classList.add('fs-mode');
+    try { document.documentElement.requestFullscreen?.().catch(() => {}); } catch {}
+    $('#fsQty').value = Math.max(1, +$('#qtyInput').value || 1);
+  } else {
+    fsState.card?.classList.remove('fs-active');
+    document.body.classList.remove('fs-mode');
+    fsState.card = null;
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  }
+  fsState.on = on;
+  syncFsButtons();
+  scheduleRender();
+  // Tras el cambio de tamaño, reencuadrar las velas para aprovechar todo el ancho
+  setTimeout(() => {
+    MainChart.chart?.timeScale().fitContent();
+    if (Challenge.chart && state.challenge) Challenge.chart.timeScale().fitContent();
+  }, 150);
+}
+function syncFsButtons() {
+  $$('[data-fs]').forEach(b => {
+    b.innerHTML = icon(fsState.on ? 'minimize' : 'maximize', 18);
+    b.title = fsState.on ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)';
+    b.setAttribute('aria-label', b.title);
+  });
+}
+/* Compra/venta rápida a mercado desde la barra compacta */
+function quickOrder(side) {
+  const qty = Math.floor(+$('#fsQty').value);
+  const r = placeOrder({ sym: state.selected, side, type: 'market', qty, trigger: null });
+  if (r.error) toast('Orden rechazada', r.error, 'error');
+}
+function renderFsBar() {
+  const s = state.selected, pos = state.positions[s];
+  $('#fsInfo').textContent = `Disponible ${fmtMoney(availableCash())} · Posición ${pos ? fmtQty(pos.qty) : 0} ${s}`;
+}
+
+/* ---- MODO RETO ----
+   Cuenta separada (10.000 €), valor oculto, se avanza vela a vela (1 vela = 1 día).
+   Velas reales de Finnhub si el plan lo permite (periodo aleatorio de los últimos 5 años);
+   si no, una serie simulada con cambios de tendencia. */
+const CH_UNIVERSE = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 'AMD', 'JPM', 'KO', 'DIS', 'SPY', 'QQQ'];
+const CH_WARMUP = 60;           // velas de contexto previas al inicio
+const CH_BASE = 946684800;      // eje temporal ficticio (oculta las fechas reales)
+const chDay = t => Math.round((t - CH_BASE) / 86400) - CH_WARMUP + 1;
+
+/* Serie simulada: tramos de 15–60 velas con tendencia y volatilidad distintas */
+function synthChallenge(total) {
+  const g = () => gaussFrom(Math.random);
+  let price = 20 + Math.random() * 280, drift = 0, vol = 0.015, left = 0;
+  const bars = [];
+  for (let i = 0; i < total; i++) {
+    if (left-- <= 0) { left = 15 + Math.floor(Math.random() * 45); drift = g() * 0.0025; vol = 0.01 + Math.random() * 0.018; }
+    const open = price, close = Math.max(1, open * (1 + drift + g() * vol));
+    const high = Math.max(open, close) * (1 + Math.abs(g()) * vol * 0.4), low = Math.min(open, close) * (1 - Math.abs(g()) * vol * 0.4);
+    bars.push({ open, high, low, close });
+    price = close;
+  }
+  return bars;
+}
+
+const Challenge = {
+  chart: null, series: null, timer: null, loading: false,
+  get c() { return state.challenge; },
+  initChart() {
+    if (this.chart || !hasCharts()) return;
+    const fmtDay = t => { const d = chDay(t); return d > 0 ? 'Día ' + d : 'Previo'; };
+    this.chart = LightweightCharts.createChart($('#chChart'), chartOptions({
+      timeScale: { borderColor: C.border, timeVisible: false, rightOffset: 6, tickMarkFormatter: fmtDay },
+    }));
+    this.chart.applyOptions({ localization: { locale: 'es-ES', priceFormatter: p => fmtNum(p), timeFormatter: fmtDay } });
+    this.series = this.chart.addCandlestickSeries({});
+    this.restyle();
+  },
+  restyle() {
+    if (!this.chart) return;
+    const fmtDay = t => { const d = chDay(t); return d > 0 ? 'Día ' + d : 'Previo'; };
+    this.chart.applyOptions(chartOptions({ timeScale: { borderColor: C.border, timeVisible: false, rightOffset: 6, tickMarkFormatter: fmtDay } }));
+    this.chart.applyOptions({ localization: { locale: 'es-ES', priceFormatter: p => fmtNum(p), timeFormatter: fmtDay } });
+    this.series.applyOptions({ upColor: C.green, downColor: C.red, borderUpColor: C.green, borderDownColor: C.red, wickUpColor: C.green, wickDownColor: C.red, priceLineColor: C.muted });
+    this.markers();
+  },
+  enter() {
+    this.initChart();
+    if (!this.c) this.start(); else this.draw();
+  },
+  async start() {
+    if (this.loading) return;
+    this.stopAuto();
+    this.loading = true;
+    $('#chOverlay').hidden = false; $('#chOverlay').textContent = 'Preparando reto…';
+    const len = state.challengeCfg.len, total = CH_WARMUP + len;
+    const sym = CH_UNIVERSE[Math.floor(Math.random() * CH_UNIVERSE.length)];
+    let raw = null, simulated = true, period = '';
+    if (!isDemo() && live.candleAccess) {
+      try {
+        const to = nowSec() - Math.floor(Math.random() * 4 * 365) * 86400;
+        const from = to - Math.ceil(total * 1.6) * 86400; // margen por fines de semana y festivos
+        const d = await fh('/stock/candle', { symbol: sym, resolution: 'D', from, to });
+        if (d.s === 'ok' && d.t?.length >= total) {
+          const f = await eurFactor(sym), st = d.t.length - total;
+          raw = d.t.slice(st).map((t, i) => ({ open: d.o[st + i] * f, high: d.h[st + i] * f, low: d.l[st + i] * f, close: d.c[st + i] * f }));
+          const df = t => new Date(t * 1000).toLocaleDateString('es-ES', { month: 'short', year: 'numeric' });
+          period = `${df(d.t[st + CH_WARMUP])} – ${df(d.t[d.t.length - 1])}`;
+          simulated = false;
+        }
+      } catch (e) { if (e.status === 401 || e.status === 403) live.candleAccess = false; }
+    }
+    if (!raw) raw = synthChallenge(total);
+    // Fechas ficticias consecutivas: el jugador no puede deducir el periodo real
+    const bars = raw.map((b, i) => ({ time: CH_BASE + i * 86400, open: round(b.open, 4), high: round(b.high, 4), low: round(b.low, 4), close: round(b.close, 4) }));
+    state.challenge = { sym: simulated ? 'Serie simulada' : sym, simulated, period, bars, idx: CH_WARMUP - 1, len,
+      cash: START_CASH, qty: 0, avg: 0, fees: 0, trades: [], done: false, startedAt: Date.now() };
+    saveState();
+    this.loading = false;
+    $('#chOverlay').hidden = true;
+    $('#chResult').hidden = true;
+    this.draw();
+  },
+  draw() {
+    const c = this.c; if (!c || !this.series) return;
+    this.series.setData(c.bars.slice(0, c.idx + 1));
+    this.markers();
+    this.chart.timeScale().fitContent();
+    this.render();
+  },
+  markers() {
+    const c = this.c; if (!c || !this.series) return;
+    this.series.setMarkers(c.trades.map(t => t.side === 'buy'
+      ? { time: c.bars[t.i].time, position: 'belowBar', color: C.fg, shape: 'arrowUp', text: 'C' }
+      : { time: c.bars[t.i].time, position: 'aboveBar', color: C.red, shape: 'arrowDown', text: 'V' }));
+  },
+  price() { const c = this.c; return c ? c.bars[c.idx].close : null; },
+  value() { const c = this.c; return c ? c.cash + c.qty * this.price() : 0; },
+  /* Comprar y mantener: todo el capital al cierre de la primera vela, con comisión de compra y de venta */
+  bhReturn() {
+    const c = this.c; if (!c) return 0;
+    const p0 = c.bars[CH_WARMUP - 1].close, sh = Math.floor(START_CASH / (p0 * (1 + FEE_RATE)));
+    const left = START_CASH - sh * p0 * (1 + FEE_RATE), end = left + sh * this.price() * (1 - FEE_RATE);
+    return (end / START_CASH - 1) * 100;
+  },
+  next() {
+    const c = this.c; if (!c || c.done || this.loading) return;
+    if (c.idx >= c.bars.length - 1) { this.finish(); return; }
+    c.idx++;
+    this.series?.update(c.bars[c.idx]);
+    this.chart?.timeScale().scrollToRealTime();
+    if (c.idx >= c.bars.length - 1) this.finish(); else { saveSoon(); this.render(); }
+  },
+  trade(side, qty) {
+    const c = this.c; if (!c || c.done) return;
+    qty = Math.floor(qty);
+    if (!(qty > 0)) return toast('Cantidad no válida', 'Introduce un número entero de acciones', 'error');
+    const p = this.price(), gross = qty * p, fee = gross * FEE_RATE;
+    if (side === 'buy') {
+      if (gross + fee > c.cash + 1e-9) return toast('Saldo insuficiente', `Necesitas ${fmtMoney(gross + fee)} y tienes ${fmtMoney(c.cash)}`, 'error');
+      c.avg = (c.avg * c.qty + gross) / (c.qty + qty); c.qty += qty; c.cash -= gross + fee;
+      c.trades.push({ i: c.idx, side, qty, price: p, fee });
+    } else {
+      if (qty > c.qty) return toast('Posición insuficiente', `Solo tienes ${fmtQty(c.qty)} acciones`, 'error');
+      const realized = (p - c.avg) * qty - fee;
+      c.qty -= qty; c.cash += gross - fee; if (!c.qty) c.avg = 0;
+      c.trades.push({ i: c.idx, side, qty, price: p, fee, realized });
+    }
+    c.fees += fee;
+    saveSoon(); this.markers(); this.render();
+    toast(side === 'buy' ? 'Compra (reto)' : 'Venta (reto)', `${fmtQty(qty)} acc. a ${fmtPrice(p)} · comisión ${fmtMoney(fee)}`);
+  },
+  maxQty() { const c = this.c, p = this.price(); return c && p ? Math.floor(c.cash / (p * (1 + FEE_RATE))) : 0; },
+  finish() {
+    const c = this.c; if (!c || c.done) return;
+    this.stopAuto();
+    c.done = true;
+    const ret = (this.value() / START_CASH - 1) * 100, bh = this.bhReturn();
+    state.challengeHistory.unshift({ at: Date.now(), sym: c.sym, simulated: c.simulated, period: c.period,
+      candles: c.idx - CH_WARMUP + 1, trades: c.trades.length, ret, bh });
+    state.challengeHistory = state.challengeHistory.slice(0, 30);
+    saveState();
+    this.render();
+    toast(ret > bh ? '¡Has ganado a comprar y mantener!' : 'Reto terminado', `Tu resultado ${nf2.format(ret)} % · comprar y mantener ${nf2.format(bh)} %`);
+  },
+  toggleAuto() { this.timer ? this.stopAuto() : this.startAuto(); },
+  startAuto() {
+    const c = this.c; if (!c || c.done) return;
+    this.stopAuto();
+    this.timer = setInterval(() => this.next(), 1000 / state.challengeCfg.speed);
+    this.render();
+  },
+  stopAuto() { if (this.timer) { clearInterval(this.timer); this.timer = null; } if (ui.view === 'challenge') this.render(); },
+  render() {
+    const c = this.c; if (!c) return;
+    const p = this.price(), prev = c.bars[c.idx - 1]?.close, day = c.idx - CH_WARMUP + 1;
+    const ret = (this.value() / START_CASH - 1) * 100, bh = this.bhReturn();
+    $('#chSym').textContent = c.done ? c.sym : 'Valor oculto';
+    const badge = $('#chBadge'); badge.textContent = c.done ? (c.simulated ? 'Datos simulados' : 'Datos reales') : `${c.len} velas`;
+    $('#chProgress').textContent = c.done ? (c.period ? `Periodo real: ${c.period}` : 'Serie generada aleatoriamente') : `Día ${Math.max(0, day)} de ${c.len}`;
+    $('#chPrice').textContent = fmtPrice(p);
+    $('#chDayChg').innerHTML = prev ? deltaPct((p - prev) / prev * 100) + ' <span class="muted">en la vela</span>' : '';
+    $('#chCash').textContent = fmtMoney(c.cash);
+    $('#chCashSub').textContent = `Comisiones pagadas ${fmtMoney(c.fees)}`;
+    $('#chPos').textContent = `${fmtQty(c.qty)} acc.`;
+    $('#chPosSub').innerHTML = c.qty ? `Precio medio ${fmtPrice(c.avg)} · ${deltaMoney((p - c.avg) * c.qty)}` : 'Sin posición abierta';
+    const setVal = (id, v) => { const el = $(id); el.textContent = arrow(v) + nf2.format(Math.abs(v)) + ' %'; el.className = 'metric-value' + (v < -1e-9 ? ' neg' : ''); };
+    setVal('#chRet', ret); setVal('#chBh', bh);
+    $('#chRetSub').innerHTML = `Valor ${fmtMoney(this.value())} · ${ret >= bh ? 'vas por delante' : 'vas por detrás'}`;
+    // Controles
+    const play = $('#chPlay'), playing = !!this.timer;
+    play.innerHTML = icon(playing ? 'pause' : 'play', 14) + (playing ? 'Pausa' : 'Auto');
+    $$('#chSpeed button').forEach(b => b.classList.toggle('active', +b.dataset.speed === state.challengeCfg.speed));
+    ['#chPlay', '#chNext', '#chBuy', '#chSell', '#chMax', '#chFinish'].forEach(id => { $(id).disabled = c.done || this.loading; });
+    // Resultado final
+    const res = $('#chResult');
+    res.hidden = !c.done;
+    if (c.done) {
+      const win = ret > bh;
+      const html = `<div class="eyebrow">Resultado</div>
+        <h2 class="h1">${win ? 'Has batido a comprar y mantener' : 'Comprar y mantener ha ganado esta vez'}</h2>
+        <p class="muted">Valor: <b style="color:var(--fg)">${esc(c.sym)}</b>${c.period ? ' · ' + esc(c.period) : ' · serie simulada'} · ${fmtQty(c.trades.length)} operaciones · ${fmtMoney(c.fees)} en comisiones.</p>
+        <dl class="kv" style="margin:0;max-width:420px"><dt>Tu resultado</dt><dd>${deltaPct(ret)}</dd><dt>Comprar y mantener</dt><dd>${deltaPct(bh)}</dd><dt>Diferencia</dt><dd>${deltaPct(ret - bh)}</dd></dl>
+        <div><button class="btn btn-primary" data-ch-new>${icon('rotate', 14)}Jugar otro reto</button></div>`;
+      if (res._h !== html) { res.innerHTML = html; res._h = html; } // no recrear el botón en cada render
+    }
+    // Tablas
+    $('#chTradesEmpty').hidden = c.trades.length > 0;
+    patchRows($('#chTradesBody'), [...c.trades].reverse().map((t, k) => ({ key: c.startedAt + '-' + (c.trades.length - k), cells: [
+      { html: `Día ${t.i - CH_WARMUP + 1}` },
+      { html: t.side === 'buy' ? '<span class="badge badge-outline">Compra</span>' : '<span class="badge badge-red">Venta</span>' },
+      { cls: 'r', html: fmtQty(t.qty) }, { cls: 'r', html: fmtPrice(t.price) }, { cls: 'r', html: fmtMoney(t.fee) },
+      { cls: 'r', html: t.side === 'sell' ? deltaMoney(t.realized) : '<span class="flat">—</span>' },
+    ] })));
+    const h = state.challengeHistory, wins = h.filter(x => x.ret > x.bh).length;
+    $('#chHistEmpty').hidden = h.length > 0;
+    $('#chHistSub').textContent = h.length ? `Has batido a comprar y mantener en ${wins} de ${h.length} retos.` : '';
+    patchRows($('#chHistBody'), h.map(x => ({ key: String(x.at), cells: [
+      { html: fmtDate(x.at) }, { html: `<span class="tick">${esc(x.sym)}</span>${x.period ? `<div class="sub">${esc(x.period)}</div>` : ''}` },
+      { html: x.simulated ? 'Simulados' : 'Reales' }, { cls: 'r', html: fmtQty(x.candles) }, { cls: 'r', html: fmtQty(x.trades) },
+      { cls: 'r', html: deltaPct(x.ret) }, { cls: 'r', html: deltaPct(x.bh) },
+      { html: x.ret > x.bh ? '<span class="badge badge-solid">Ganado</span>' : '<span class="badge badge-muted">Perdido</span>' },
+    ] })));
+  },
+};
+function syncChallengeSettings() {
+  const cfg = state.challengeCfg;
+  $$('#chEnableSeg button').forEach(b => b.classList.toggle('active', (b.dataset.chEnable === '1') === cfg.enabled));
+  $$('#chLenSeg button').forEach(b => b.classList.toggle('active', +b.dataset.chLen === cfg.len));
+  $$('[data-nav="challenge"]').forEach(a => { a.hidden = !cfg.enabled; });
+}
+
+/* ---------------------------------------------------------------------
+   8. PALETA DE COMANDOS, DIÁLOGOS Y TOASTS
+   --------------------------------------------------------------------- */
+const pal = { items: [], idx: 0, req: 0, lastFocus: null };
+const COMMANDS = [
+  { label: 'Ir a Mercado', icon: 'candles', run: () => goView('market') },
+  { label: 'Ir a Cartera', icon: 'briefcase', run: () => goView('portfolio') },
+  { label: 'Ir a Órdenes', icon: 'list', run: () => goView('orders') },
+  { label: 'Ir a Guía de estrategias', icon: 'book', run: () => goView('guide') },
+  { label: 'Ir a Ajustes', icon: 'settings', run: () => goView('settings') },
+];
+function openPalette() {
+  pal.lastFocus = document.activeElement;
+  $('#palette').hidden = false;
+  const inp = $('#paletteInput'); inp.value = '';
+  runSearch();
+  setTimeout(() => inp.focus(), 0);
+}
+function closePalette() { $('#palette').hidden = true; pal.lastFocus?.focus?.(); }
+
+async function runSearch() {
+  const q = $('#paletteInput').value.trim(), id = ++pal.req;
+  const cmds = COMMANDS.filter(c => !q || c.label.toLowerCase().includes(q.toLowerCase())).map(c => ({ kind: 'cmd', group: 'Comandos', ...c }));
+  let syms = [], note = '';
+  $('#paletteSpinner').hidden = !q || isDemo();
+  try { syms = await searchSymbols(q); }
+  catch (e) { // si falla la búsqueda remota, se ofrece el catálogo local
+    note = e.message;
+    const ql = q.toLowerCase();
+    syms = DEMO_UNIVERSE.filter(([s, n]) => s.toLowerCase().startsWith(ql) || n.toLowerCase().includes(ql)).map(([symbol, name]) => ({ symbol, name, meta: '' }));
+  }
+  if (id !== pal.req) return; // respuesta obsoleta
+  $('#paletteSpinner').hidden = true;
+  // Permitir abrir directamente un ticker escrito (útil para SAN.MC, etc.)
+  const looksTicker = /^[A-Za-z0-9.\-^=]{1,15}$/.test(q);
+  if (q && looksTicker && !syms.some(s => s.symbol.toUpperCase() === q.toUpperCase())) syms.unshift({ symbol: q.toUpperCase(), name: 'Abrir este ticker', meta: '', direct: true });
+  const group = q ? 'Valores' : 'Populares';
+  pal.items = [...syms.map(s => ({ kind: 'sym', group, ...s })), ...cmds];
+  pal.note = note;
+  pal.idx = 0;
+  renderPalette();
+}
+const runSearchDebounced = debounce(runSearch, 220);
+
+function renderPalette() {
+  const list = $('#paletteList');
+  if (!pal.items.length) {
+    list.innerHTML = `<div class="pal-empty">${pal.note ? `<span class="neg">${esc(pal.note)}</span>` : 'Sin resultados.'}</div>`;
+    return;
+  }
+  let html = '', g = null;
+  if (pal.note) html += `<div class="pal-empty neg" style="padding:8px 10px;text-align:left">${esc(pal.note)}</div>`;
+  pal.items.forEach((it, i) => {
+    if (it.group !== g) { g = it.group; html += `<div class="pal-group label">${g}</div>`; }
+    const active = i === pal.idx ? ' active' : '';
+    if (it.kind === 'cmd') {
+      html += `<div class="pal-item${active}" role="option" aria-selected="${!!active}" data-i="${i}">${icon(it.icon)}<span>${esc(it.label)}</span></div>`;
+    } else {
+      const inW = state.watchlist.includes(it.symbol);
+      html += `<div class="pal-item${active}" role="option" aria-selected="${!!active}" data-i="${i}">
+        <span class="tick">${esc(it.symbol)}</span><span class="pal-name ellipsis">${esc(it.name || nameOf(it.symbol))}</span>
+        ${it.meta ? `<span class="pal-meta hide-sm">${esc(it.meta)}</span>` : ''}
+        <button class="icon-btn${inW ? ' active' : ''}" data-watch="${esc(it.symbol)}" title="${inW ? 'Quitar de seguimiento' : 'Añadir a seguimiento'}" aria-label="${inW ? 'Quitar' : 'Añadir'} ${esc(it.symbol)} ${inW ? 'de' : 'a'} la lista">${icon(inW ? 'check' : 'plus')}</button>
+      </div>`;
+    }
+  });
+  list.innerHTML = html;
+  list.querySelector('.pal-item.active')?.scrollIntoView({ block: 'nearest' });
+}
+function activatePaletteItem(i, addToWatch) {
+  const it = pal.items[i]; if (!it) return;
+  if (it.kind === 'cmd') { closePalette(); it.run(); return; }
+  if (it.name && !it.direct && !state.names[it.symbol]) state.names[it.symbol] = it.name;
+  if (addToWatch) {
+    const added = toggleWatch(it.symbol);
+    toast(added ? 'Añadido a seguimiento' : 'Quitado de seguimiento', it.symbol);
+    renderPalette();
+    return;
+  }
+  closePalette();
+  selectSymbol(it.symbol);
+}
+
+function confirmDialog({ title, text, okLabel }) {
+  return new Promise(resolve => {
+    const ov = $('#confirm'), ok = $('#confirmOk'), cancel = $('#confirmCancel'), prev = document.activeElement;
+    $('#confirmTitle').textContent = title; $('#confirmText').textContent = text; ok.textContent = okLabel || 'Confirmar';
+    ov.hidden = false; cancel.focus(); // foco en la opción segura
+    const done = v => { ov.hidden = true; ok.onclick = cancel.onclick = ov.onclick = null; document.removeEventListener('keydown', onKey, true); prev?.focus?.(); resolve(v); };
+    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); done(false); } };
+    ok.onclick = () => done(true);
+    cancel.onclick = () => done(false);
+    ov.onclick = e => { if (e.target === ov) done(false); };
+    document.addEventListener('keydown', onKey, true);
+  });
+}
+
+function toast(title, desc, variant) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (variant || '');
+  el.innerHTML = `<div class="toast-title">${esc(title)}</div>${desc ? `<div class="toast-desc">${esc(desc)}</div>` : ''}`;
+  $('#toasts').append(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 220); }, 2500); // visible 2,5 s
+}
+
+/* ---------------------------------------------------------------------
+   9. EVENTOS E INICIALIZACIÓN
+   --------------------------------------------------------------------- */
+function bindEvents() {
+  window.addEventListener('hashchange', () => showView(viewFromHash()));
+
+  // Atajos globales: ⌘K / Ctrl+K y "/"
+  document.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && k === 'k') { e.preventDefault(); $('#palette').hidden ? openPalette() : closePalette(); return; }
+    const typing = /^(input|textarea|select)$/i.test(e.target.tagName);
+    const free = !typing && !e.metaKey && !e.ctrlKey && !e.altKey && $('#palette').hidden && $('#confirm').hidden;
+    if (!free) return;
+    if (e.key === '/') { e.preventDefault(); openPalette(); return; }
+    // F: pantalla completa del gráfico · Esc: salir
+    if (k === 'f') { e.preventDefault(); toggleFullscreen(); return; }
+    if (e.key === 'Escape' && fsState.on) { toggleFullscreen(false); return; }
+    // Atajos del modo reto
+    if (ui.view === 'challenge') {
+      if (document.activeElement?.tagName === 'BUTTON') document.activeElement.blur(); // evita doble acción con Espacio
+      if (e.key === 'ArrowRight' || k === 'n') { e.preventDefault(); Challenge.next(); }
+      else if (e.key === ' ') { e.preventDefault(); Challenge.toggleAuto(); }
+      else if (k === 'b') Challenge.trade('buy', +$('#chQty').value);
+      else if (k === 's') Challenge.trade('sell', +$('#chQty').value);
+    }
+  });
+
+  // Pantalla completa
+  document.addEventListener('click', e => {
+    if (e.target.closest('[data-fs]')) toggleFullscreen();
+    else if (e.target.closest('[data-fs-exit]')) toggleFullscreen(false);
+  });
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && fsState.on) toggleFullscreen(false); });
+  $('#fsBuy').onclick = () => quickOrder('buy');
+  $('#fsSell').onclick = () => quickOrder('sell');
+  $$('[data-mq]').forEach(b => b.onclick = () => { const i = $('#fsQty'); i.value = Math.max(1, (Math.floor(+i.value) || 1) + +b.dataset.mq); });
+
+  // Modo reto
+  $('#chNew').onclick = async () => {
+    const c = state.challenge;
+    if (c && !c.done && c.trades.length) {
+      const ok = await confirmDialog({ title: '¿Abandonar el reto actual?', text: 'El reto en curso se descartará y no contará en tu historial.', okLabel: 'Empezar otro' });
+      if (!ok) return;
+    }
+    Challenge.start();
+  };
+  $('[data-view="challenge"]').addEventListener('click', e => { if (e.target.closest('[data-ch-new]')) Challenge.start(); });
+  $('#chNext').onclick = () => Challenge.next();
+  $('#chPlay').onclick = () => Challenge.toggleAuto();
+  $('#chSpeed').onclick = e => {
+    const b = e.target.closest('[data-speed]'); if (!b) return;
+    state.challengeCfg.speed = +b.dataset.speed; saveSoon();
+    if (Challenge.timer) Challenge.startAuto(); else Challenge.render();
+  };
+  $('#chBuy').onclick = () => Challenge.trade('buy', +$('#chQty').value);
+  $('#chSell').onclick = () => Challenge.trade('sell', +$('#chQty').value);
+  $('#chMax').onclick = () => { $('#chQty').value = Math.max(1, Challenge.maxQty() || state.challenge?.qty || 1); };
+  $$('[data-cq]').forEach(b => b.onclick = () => { const i = $('#chQty'); i.value = Math.max(1, (Math.floor(+i.value) || 1) + +b.dataset.cq); });
+  $('#chFinish').onclick = async () => {
+    const ok = await confirmDialog({ title: '¿Terminar el reto ahora?', text: 'Se calculará tu resultado con el precio de la vela actual y se comparará con comprar y mantener hasta este mismo día.', okLabel: 'Terminar reto' });
+    if (ok) Challenge.finish();
+  };
+  $('#chEnableSeg').onclick = e => {
+    const b = e.target.closest('[data-ch-enable]'); if (!b) return;
+    state.challengeCfg.enabled = b.dataset.chEnable === '1';
+    saveState(); syncChallengeSettings();
+    if (!state.challengeCfg.enabled) Challenge.stopAuto();
+    toast(state.challengeCfg.enabled ? 'Modo reto activado' : 'Modo reto desactivado', state.challengeCfg.enabled ? 'Tienes la pestaña «Reto» en el menú' : '');
+  };
+  $('#chLenSeg').onclick = e => {
+    const b = e.target.closest('[data-ch-len]'); if (!b) return;
+    state.challengeCfg.len = +b.dataset.chLen; saveState(); syncChallengeSettings();
+  };
+  $('#openPalette').onclick = openPalette;
+  $('#addWatch').onclick = openPalette;
+
+  // Paleta
+  $('#paletteInput').addEventListener('input', runSearchDebounced);
+  $('#paletteInput').addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); pal.idx = Math.min(pal.items.length - 1, pal.idx + 1); renderPalette(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); pal.idx = Math.max(0, pal.idx - 1); renderPalette(); }
+    else if (e.key === 'Enter') { e.preventDefault(); activatePaletteItem(pal.idx, e.shiftKey); }
+    else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+  });
+  $('#palette').addEventListener('click', e => {
+    if (e.target.id === 'palette') return closePalette();
+    const w = e.target.closest('[data-watch]');
+    const item = e.target.closest('.pal-item');
+    if (!item) return;
+    activatePaletteItem(+item.dataset.i, !!w);
+  });
+  $('#paletteList').addEventListener('mousemove', e => {
+    const item = e.target.closest('.pal-item');
+    if (item && +item.dataset.i !== pal.idx) {
+      $$('.pal-item', $('#paletteList')).forEach(x => x.classList.remove('active'));
+      item.classList.add('active'); pal.idx = +item.dataset.i;
+    }
+  });
+
+  // Gráfico
+  $('#rangeSeg').onclick = e => { const b = e.target.closest('[data-range]'); if (!b) return; state.range = b.dataset.range; saveSoon(); syncSegments(); MainChart.load(); };
+  $('#typeSeg').onclick = e => { const b = e.target.closest('[data-ctype]'); if (!b) return; state.chartType = b.dataset.ctype; saveSoon(); syncSegments(); MainChart.applyType(); };
+  $('#watchToggle').onclick = () => { const added = toggleWatch(state.selected); toast(added ? 'Añadido a seguimiento' : 'Quitado de seguimiento', state.selected); };
+
+  // Watchlist
+  $('#watchBody').addEventListener('click', e => {
+    const rm = e.target.closest('[data-remove]');
+    if (rm) { e.stopPropagation(); toggleWatch(rm.dataset.remove); return; }
+    const tr = e.target.closest('tr[data-key]'); if (tr) { selectSymbol(tr.dataset.key, { go: false }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  });
+
+  // Panel de orden
+  $('#sideSeg').onclick = e => { const b = e.target.closest('[data-side]'); if (!b) return; ui.side = b.dataset.side; applyOrderUI(); };
+  $('#otypeSeg').onclick = e => { const b = e.target.closest('[data-otype]'); if (!b) return; ui.otype = b.dataset.otype; if (ui.otype !== 'market') prefillTrigger(false); applyOrderUI(); };
+  const qty = $('#qtyInput');
+  const setQty = v => { qty.value = Math.max(1, Math.floor(v) || 1); updateOrderSummary(); };
+  $('#qtyMinus').onclick = () => setQty(+qty.value - 1);
+  $('#qtyPlus').onclick = () => setQty(+qty.value + 1);
+  $('#qtyMax').onclick = () => {
+    const f = readOrderForm(), price = priceOf(f.sym), ref = f.type === 'market' ? price : (f.trigger > 0 ? f.trigger : price);
+    if (f.side === 'buy') { if (ref) setQty(Math.floor(availableCash() / (ref * (1 + FEE_RATE)))); }
+    else setQty(availableQty(f.sym));
+  };
+  qty.addEventListener('input', updateOrderSummary);
+  $('#triggerInput').addEventListener('input', () => { ui.touchedTrigger = true; updateOrderSummary(); });
+  $('#orderForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = readOrderForm();
+    const r = placeOrder(f);
+    if (r.error) { $('#orderError').textContent = r.error; toast('Orden rechazada', r.error, 'error'); }
+  });
+
+  // Cartera y órdenes
+  $('#posBody').addEventListener('click', e => { const tr = e.target.closest('tr[data-key]'); if (tr) selectSymbol(tr.dataset.key); });
+  $('#ordersFilter').onclick = e => { const b = e.target.closest('[data-filter]'); if (!b) return; ui.ordersFilter = b.dataset.filter; renderOrders(); };
+  $('#ordersBody').addEventListener('click', e => {
+    const b = e.target.closest('[data-cancel]'); if (!b) return;
+    const o = state.orders.find(x => x.id === b.dataset.cancel);
+    if (o && o.status === 'pending') cancelOrder(o);
+  });
+  $$('[data-action="reset"]').forEach(b => b.onclick = resetAccount);
+
+  // Guía: calculadora y enlaces a fuentes (desplazan sin cambiar el hash de la vista)
+  ['#cCapital', '#cRisk', '#cEntry', '#cStop'].forEach(id => $(id).addEventListener('input', updateCalc));
+  $('#cApply').onclick = applyCalc;
+  $('[data-view="guide"]').addEventListener('click', e => {
+    const a = e.target.closest('a.src'); if (!a) return;
+    e.preventDefault();
+    const target = $(a.getAttribute('href'));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      $$('.sources li').forEach(li => li.style.background = '');
+      target.style.background = 'var(--bg)';
+    }
+  });
+
+  // Ajustes: API key
+  $('#toggleKey').onclick = () => { const i = $('#apiKeyInput'); i.type = i.type === 'password' ? 'text' : 'password'; };
+  $('#saveKey').onclick = () => {
+    const k = $('#apiKeyInput').value.trim();
+    if (!k) { $('#keyStatus').innerHTML = '<span class="neg">Introduce una API key o usa el modo demo.</span>'; return; }
+    setApiKey(k); startEngine();
+    $('#keyStatus').textContent = 'Clave guardada. Conectando con Finnhub…';
+    toast('API key guardada', 'Cambiando a datos reales de mercado');
+  };
+  $('#testKey').onclick = async () => {
+    const k = $('#apiKeyInput').value.trim(), st = $('#keyStatus');
+    if (!k) { st.innerHTML = '<span class="neg">Introduce una API key.</span>'; return; }
+    st.textContent = 'Probando…';
+    try { const q = await fh('/quote', { symbol: 'AAPL' }, k); await loadFX(); const f = fxFactor('AAPL'); st.textContent = `Clave válida. AAPL cotiza a ${fmtNum(q.c)} USD${f ? ` (${fmtPrice(q.c * f)})` : ''}.`; }
+    catch (e) { st.innerHTML = `<span class="neg">${esc(e.message)}</span>`; }
+  };
+  $('#clearKey').onclick = () => {
+    if (isDemo()) { $('#keyStatus').textContent = 'Ya estás en modo demo.'; return; }
+    setApiKey(''); $('#apiKeyInput').value = ''; startEngine();
+    $('#keyStatus').textContent = 'Clave eliminada. Modo demo activado.';
+    toast('Modo demo activado', 'Los precios ahora son simulados');
+  };
+
+  // Tema
+  $('#themeToggle').onclick = () => setTheme(effectiveTheme() === 'dark' ? 'light' : 'dark');
+  $('#themeSeg').onclick = e => { const b = e.target.closest('[data-theme-opt]'); if (b) setTheme(b.dataset.themeOpt); };
+  darkMQ?.addEventListener?.('change', () => { if (getTheme() === 'system') onThemeChange(); });
+
+  window.addEventListener('beforeunload', saveState);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !isDemo()) pollQuotes(true); });
+}
+
+function syncSegments() {
+  $$('#rangeSeg button').forEach(b => b.classList.toggle('active', b.dataset.range === state.range));
+  $$('#typeSeg button').forEach(b => b.classList.toggle('active', b.dataset.ctype === state.chartType));
+}
+
+function init() {
+  hydrateIcons();
+  readColors();
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  const k = isMac ? '⌘K' : 'Ctrl K';
+  $('#kbdHint').textContent = k; $$('.kbd-dyn').forEach(e => { e.textContent = k; });
+  MainChart.init();
+  EquityChart.init();
+  bindEvents();
+  syncChallengeSettings();
+  syncFsButtons();
+  onThemeChange();
+  syncSegments();
+  applyOrderUI();
+  showView(viewFromHash());
+  startEngine();
+  prefillTrigger(true);
+  if (state._migrated) { // venía de una cuenta en dólares
+    delete state._migrated; saveState();
+    toast('La cuenta ahora es en euros', 'Se ha reiniciado con 10.000,00 €. Tu lista de seguimiento se conserva.');
+  } else saveState();
+}
+init();
+</script>
+</body>
+</html>
